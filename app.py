@@ -1233,12 +1233,19 @@ if mode == "📄 PDF към Excel":
         1,
     )[0].strip()
 
+   uploaded_pdfs = st.file_uploader(
+        "📄 Качи PDF фактура",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="pdf_invoice_uploader"
+    )
+    
     reference_preview, reference_diagnostics = (
         load_vendor_cross_references(
             selected_vendor_number
         )
     )
-
+    
     if reference_preview.empty:
         st.warning(
             f"Не са намерени Cross Reference записи за "
