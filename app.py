@@ -1198,154 +1198,205 @@ mode = st.sidebar.radio(
 # SCREEN 1: PDF TO EXCEL
 # ======================================================
 if mode == "📄 PDF към Excel":
+
     st.subheader("📄 PDF фактура към Excel")
 
     vendors_dataframe, vendor_diagnostics = load_vendor_mapping()
 
     if vendors_dataframe.empty:
+
         st.error(
             "Не е намерен vendor справочник с колони "
             "Buy-from Vendor No. и Buy-from Vendor Name."
         )
 
         with st.expander("🔎 Диагностика"):
+
             for message in vendor_diagnostics:
+
                 st.write(f"• {message}")
 
         st.stop()
 
+    # ==================================================
+    # ✅ VENDOR LIST
+    # ==================================================
     vendor_options = vendors_dataframe.apply(
         lambda row: (
             f"{row['Vendor No.']} | {row['Vendor Name']}"
             if row["Vendor Name"]
             else row["Vendor No."]
         ),
-        axis=1,
+        axis=1
     ).tolist()
 
     selected_vendor_label = st.selectbox(
         "Избери доставчик / Vendor",
-        vendor_options,
+        vendor_options
     )
 
-    selected_vendor_number = selected_vendor_label.split(
-        " | ",
-        1,
-    )[0].strip()
+    selected_vendor_number = (
+        selected_vendor_label
+        .split(" | ", 1)[0]
+        .strip()
+    )
 
-   uploaded_pdfs = st.file_uploader(
-        "📄 Качи PDF фактура",
+    # ==================================================
+    # ✅ PDF UPLOAD
+    # ==================================================
+    uploaded_pdfs = st.file_uploader(
+        "📄 Качи една или няколко PDF фактури",
         type=["pdf"],
         accept_multiple_files=True,
         key="pdf_invoice_uploader"
     )
-    
+
+    st.info(
+        f"Избран Vendor: {selected_vendor_number}"
+    )
+
+    # ==================================================
+    # ✅ НИЩО НЕ ЗАРЕЖДА ДОКАТО НЯМА PDF
+    # ==================================================
+    if not uploaded_pdfs:
+
+        st.stop()
+
+    # ==================================================
+    # ✅ ЗАРЕЖДА CROSS REFERENCES
+    # СЛЕД КАТО ИМА PDF
+    # ==================================================
     reference_preview, reference_diagnostics = (
         load_vendor_cross_references(
             selected_vendor_number
         )
     )
-    
+
     if reference_preview.empty:
+
         st.warning(
-            f"Не са намерени Cross Reference записи за "
-            f"{selected_vendor_number}."
+            f"Не са намерени Cross Reference записи "
+            f"за {selected_vendor_number}"
         )
 
         with st.expander("🔎 Cross Reference диагностика"):
+
             for message in reference_diagnostics:
+
                 st.write(f"• {message}")
 
     else:
-        st.caption(
+
+        st.success(
             f"Намерени Cross Reference записи: "
             f"{len(reference_preview)}"
         )
 
-    uploaded_pdfs = st.file_uploader(
-        "Качи един или няколко PDF файла",
-        type=["pdf"],
-        accept_multiple_files=True,
-        key="pdf_invoice_uploader",
+    # ==================================================
+    # ✅ PDF CONVERSION
+    # ==================================================
+    with st.spinner(
+        "Разпознаване чрез Vendor Cross Reference..."
+    ):
+
+        conversion_result = convert_pdf_to_excel(
+            uploaded_pdfs,
+            selected_vendor_number
+        )
+
+    if conversion_result["output"] is None:
+
+        st.error(
+            "Не бяха разпознати редове с "
+            "Cross Reference, количество и цена."
+        )
+
+        with st.expander("🔎 Диагностика"):
+
+            for message in conversion_result[
+                "diagnostics"
+            ]:
+
+                st.write(f"• {message}")
+
+        st.stop()
+
+    # ==================================================
+    # ✅ METRICS
+    # ==================================================
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "✅ Директни",
+            conversion_result["direct"]
+        )
+
+    with col2:
+
+        st.metric(
+            "⚠️ Чрез Item No.",
+            conversion_result["alias"]
+        )
+
+    with col3:
+
+        st.metric(
+            "❗ За проверка",
+            conversion_result["not_found"]
+        )
+
+    st.success(
+        f"Страници: "
+        f"{conversion_result['pages']} | "
+        f"Таблици: "
+        f"{conversion_result['tables']}"
     )
 
-    if uploaded_pdfs:
-        with st.spinner(
-            "Разпознаване чрез Vendor Cross Reference..."
-        ):
-            conversion_result = convert_pdf_to_excel(
-                uploaded_pdfs,
-                selected_vendor_number,
-            )
+    # ==================================================
+    # ✅ PREVIEW
+    # ==================================================
+    st.subheader("📋 Контролен преглед")
 
-        if conversion_result["output"] is None:
-            st.error(
-                "Не бяха разпознати редове с Cross Reference, "
-                "количество и цена."
-            )
+    st.dataframe(
+        conversion_result["preview"],
+        use_container_width=True
+    )
 
-            with st.expander("🔎 Диагностика"):
-                for message in conversion_result["diagnostics"]:
-                    st.write(f"• {message}")
+    st.caption(
+        "⚠️ = намерен чрез Item No. | "
+        "❗ = липсва в Cross Reference"
+    )
 
-            st.stop()
+    # ==================================================
+    # ✅ DOWNLOAD EXCEL
+    # ==================================================
+    if len(uploaded_pdfs) == 1:
 
-        metric_col1, metric_col2, metric_col3 = st.columns(3)
-
-        with metric_col1:
-            st.metric(
-                "✅ Директни",
-                conversion_result["direct"],
-            )
-
-        with metric_col2:
-            st.metric(
-                "⚠️ Чрез Item No.",
-                conversion_result["alias"],
-            )
-
-        with metric_col3:
-            st.metric(
-                "❗ За проверка",
-                conversion_result["not_found"],
-            )
-
-        st.success(
-            f"Страници: {conversion_result['pages']} | "
-            f"Таблици: {conversion_result['tables']}"
+        excel_file_name = re.sub(
+            r"\.pdf$",
+            ".xlsx",
+            uploaded_pdfs[0].name,
+            flags=re.IGNORECASE
         )
 
-        st.subheader("📋 Контролен преглед")
-        st.dataframe(
-            conversion_result["preview"],
-            use_container_width=True,
+    else:
+
+        excel_file_name = (
+            "pdf_invoices_converted.xlsx"
         )
 
-        st.caption(
-            "⚠️ = Cross Reference е намерен чрез Item No. | "
-            "❗ = номерът не е намерен за избрания vendor"
-        )
-
-        if len(uploaded_pdfs) == 1:
-            excel_file_name = re.sub(
-                r"\.pdf$",
-                ".xlsx",
-                uploaded_pdfs[0].name,
-                flags=re.IGNORECASE,
-            )
-        else:
-            excel_file_name = "pdf_invoices_converted.xlsx"
-
-        st.download_button(
-            label="📥 Изтегли Excel за PRN",
-            data=conversion_result["output"],
-            file_name=excel_file_name,
-            mime=(
-                "application/vnd.openxmlformats-officedocument."
-                "spreadsheetml.sheet"
-            ),
-            use_container_width=True,
-        )
+    st.download_button(
+        label="📥 Изтегли Excel за PRN",
+        data=conversion_result["output"],
+        file_name=excel_file_name,
+        mime=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+        use_container_width=True
+    )
 
 
 # ======================================================
