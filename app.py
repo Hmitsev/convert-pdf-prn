@@ -330,8 +330,6 @@ selected_vendor_no = (
     .strip()
 )
 
-
-st.success(
 st.markdown(
     f"""
     <div style="
