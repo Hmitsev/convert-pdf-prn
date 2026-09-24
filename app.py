@@ -202,16 +202,36 @@ def load_vendors():
         vendor_no,
         vendor_name
     FROM vendors
+    WHERE vendor_no IS NOT NULL
+    AND vendor_name IS NOT NULL
     ORDER BY vendor_name
     """
 
-    return pd.read_sql(
+    df = pd.read_sql(
         query,
         conn
     )
 
+    df["vendor_no"] = (
+        df["vendor_no"]
+        .astype(str)
+        .str.strip()
+    )
 
-vendors_df = load_vendors()
+    df["vendor_name"] = (
+        df["vendor_name"]
+        .astype(str)
+        .str.strip()
+    )
+
+    # маха евентуален header ред
+    df = df[
+        df["vendor_no"]
+        .str.upper()
+        != "VENDOR_NO"
+    ]
+
+    return df.reset_index(drop=True)
 
 
 # ======================================================
