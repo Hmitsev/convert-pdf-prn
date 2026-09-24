@@ -819,12 +819,14 @@ def match_invoice_rows(
 
             output_cross_reference = (
                 reference[
-                    "cross_reference_no"
+                    "internal_item_no"
                 ]
             )
-
+            
             internal_item_no = (
-                reference["internal_item_no"]
+                reference[
+                    "cross_reference_no"
+                ]
             )
 
             match_status = "direct"
@@ -1315,12 +1317,13 @@ if page == "📄 PDF → Excel":
         preview_df = final_result_df[
             [
                 "Cross-Reference Type No.",
-                "Internal Item No.",
                 "Item No.",
+                "Internal Item No.",
                 "Cross-Reference No.",
                 "Qty",
                 "Price 1 pc"
             ]
+        ]
         ].copy()
 
         st.subheader(
