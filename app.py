@@ -855,24 +855,21 @@ def match_invoice_rows(
             match_status = "item_no"
 
         matched_rows.append({
+
             "Cross-Reference Type No.":
                 selected_vendor_no,
-            
-            "Internal Item No.":
-                internal_item_no,
         
             "Item No.":
-                invoice_item,
+                output_cross_reference,
         
             "Cross-Reference No.":
-                output_cross_reference,
+                invoice_item,
         
             "Qty":
                 quantity,
         
             "Price 1 pc":
                 price,
-
             "_invoice_item":
                 invoice_item,
 
@@ -913,6 +910,7 @@ def create_invoice_excel(result_df):
             "Qty",
             "Price 1 pc"
         ]
+    ]
     ].copy()
 
     grand_total = (
@@ -1318,7 +1316,6 @@ if page == "📄 PDF → Excel":
             [
                 "Cross-Reference Type No.",
                 "Item No.",
-                "Internal Item No.",
                 "Cross-Reference No.",
                 "Qty",
                 "Price 1 pc"
