@@ -6,7 +6,13 @@ import io
 import re
 import pdfplumber
 from psycopg2.extras import RealDictCursor
-from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.styles import (
+    Font,
+    PatternFill,
+    Border,
+    Side,
+    Alignment
+)
 
 
 # ======================================================
