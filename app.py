@@ -788,12 +788,12 @@ def extract_castrol_rows(pdf_file):
 
                     if "ST" not in numeric_line:
                         continue
-                            print(
-                                "CASTROL CHECK:",
-                                invoice_item,
-                                "->",
-                                numeric_line
-                            )
+                        print(
+                            "CASTROL CHECK:",
+                            invoice_item,
+                            "->",
+                            numeric_line
+                        )
 
                     numbers = re.findall(
                         r'\d+(?:\.\d+)?',
