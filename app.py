@@ -284,43 +284,50 @@ if st.sidebar.button(
 # VENDOR DROPDOWN
 # ======================================================
 
-vendors_df["display"] = (
-    vendors_df["vendor_no"].astype(str)
-    +
-    " | "
-    +
-    vendors_df["vendor_name"].astype(str)
-)
+if page == "📄 PDF → Excel":
 
-selected_vendor = st.selectbox(
-    "🚚 Избери доставчик",
-    vendors_df["display"],
-    index=0
-)
+    vendors_df["display"] = (
+        vendors_df["vendor_no"].astype(str)
+        +
+        " | "
+        +
+        vendors_df["vendor_name"].astype(str)
+    )
 
-selected_vendor_no = (
-    selected_vendor
-    .split(" | ")[0]
-    .strip()
-)
+    selected_vendor = st.selectbox(
+        "🚚 Избери доставчик",
+        vendors_df["display"],
+        index=0,
+        key="vendor_selector"
+    )
 
-st.markdown(
-    f"""
-    <div style="
-        background:rgba(0,0,0,0.35);
-        padding:14px;
-        border-radius:12px;
-        border:1px solid rgba(255,255,255,0.15);
-        color:#00ff88;
-        font-size:18px;
-        font-weight:700;
-    ">
-        ✅ Избран Vendor:
-        {selected_vendor_no}
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+    selected_vendor_no = (
+        selected_vendor
+        .split(" | ")[0]
+        .strip()
+    )
+
+    st.markdown(
+        f"""
+        <div style="
+            background:rgba(0,0,0,0.35);
+            padding:14px;
+            border-radius:12px;
+            border:1px solid rgba(255,255,255,0.15);
+            color:#00ff88;
+            font-size:18px;
+            font-weight:700;
+        ">
+            ✅ Избран Vendor:
+            {selected_vendor_no}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+else:
+
+    selected_vendor_no = None
 # ======================================================
 # LOAD CROSS REFERENCES
 # ======================================================
