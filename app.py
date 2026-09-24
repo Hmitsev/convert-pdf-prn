@@ -730,12 +730,13 @@ def extract_federal_rows(pdf_file):
 def extract_castrol_rows(pdf_file):
 
     rows = []
-
     full_text = ""
 
     pdf_file.seek(0)
 
     with pdfplumber.open(pdf_file) as pdf:
+
+        pages_count = len(pdf.pages)
 
         for page_number, page in enumerate(
             pdf.pages,
@@ -758,94 +759,104 @@ def extract_castrol_rows(pdf_file):
             for index in range(1, len(lines)):
 
                 current_line = lines[index]
-            
+
+                # Cross Ref код
                 if not re.match(
                     r'^[A-Z0-9]{5,10}$',
                     current_line
                 ):
                     continue
-            
+
                 invoice_item = current_line
-            
+
                 previous_line = lines[index - 1]
-            
+
+                # В Castrol редът преди кода съдържа:
+                # ST Qty Price Total VAT
+
                 if "ST" not in previous_line:
                     continue
-            
+
                 st_part = previous_line.split("ST")[-1]
 
                 numbers = re.findall(
-                    r'\d[\d,\.]*',
+                    r'\d[\d\.,]*',
                     st_part
                 )
-                st.write(
-                    "NUMBERS:",
-                    invoice_item,
-                    numbers
-                )
-            
-                if len(numbers) < 3:
+
+                if len(numbers) < 4:
                     continue
-            
+
                 try:
-            
-                    qty = float(
-                        numbers[-3].replace(",", "")
+
+                    qty = parse_european_number(
+                        numbers[0]
                     )
-            
-                    price = float(
-                        numbers[-2].replace(",", "")
+
+                    price = parse_european_number(
+                        numbers[1]
                     )
-            
+
+                    line_total = parse_european_number(
+                        numbers[2]
+                    )
+
                 except Exception:
                     continue
-            
+
+                if qty is None:
+                    continue
+
+                if price is None:
+                    continue
+
                 rows.append({
-            
+
                     "invoice_item":
                         invoice_item,
-            
+
                     "normalized_invoice_item":
                         normalize_item_number(
                             invoice_item
                         ),
-            
+
                     "qty":
                         qty,
-            
+
                     "price":
                         price,
-            
+
                     "line_total":
                         line_total,
-            
+
                     "calculation_ok":
                         True,
-            
+
                     "page":
                         page_number,
-            
+
                     "source_line":
                         previous_line
-            
+
                 })
 
-                # ====================================
-                # Търсим ред съдържащ ST + Qty + Price
-                # ====================================
+    invoice_number = extract_invoice_number(
+        full_text,
+        pdf_file.name
+    )
 
-                if " ST " not in (
-                    " " + current_line + " "
-                ):
-                    continue
+    return {
 
-                numbers = re.findall(
-                    r'\d+(?:,\d+|\.\d+)?',
-                    current_line
-                )
+        "invoice_number":
+            invoice_number,
 
-                if len(numbers) < 3:
-                    continue
+        "pages":
+            pages_count,
+
+        "rows":
+            rows
+
+    }
 
                 # ====================================
                 # Следващият ред трябва да е код
