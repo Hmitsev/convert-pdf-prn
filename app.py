@@ -1364,3 +1364,190 @@ if page == "📄 PDF → Excel":
             use_container_width=True,
             key="download_invoice_excel"
         )
+        # ======================================================
+# EXCEL → PRN
+# ======================================================
+
+if page == "🧾 Excel → PRN":
+
+    st.markdown(
+        """
+        <div class="main-card">
+            <h2>🧾 Excel → PRN</h2>
+            <p>
+            Качи Excel файлан генериран от PDF → Excel.
+            За PRN се използва колоната Item No.
+            (вътрешният Inter Cars номер).
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    uploaded_excel = st.file_uploader(
+        "📊 Качи Excel файл",
+        type=["xlsx"],
+        key="prn_excel_upload"
+    )
+
+    if uploaded_excel:
+
+        try:
+
+            df = pd.read_excel(
+                uploaded_excel
+            )
+
+            df.columns = [
+                str(col).strip()
+                for col in df.columns
+            ]
+
+            required_cols = [
+                "Item No.",
+                "Qty",
+                "Price 1 pc"
+            ]
+
+            missing = [
+                c for c in required_cols
+                if c not in df.columns
+            ]
+
+            if missing:
+
+                st.error(
+                    f"Липсват колони: "
+                    f"{', '.join(missing)}"
+                )
+
+                st.stop()
+
+            preview_df = df[
+                [
+                    "Item No.",
+                    "Qty",
+                    "Price 1 pc"
+                ]
+            ].copy()
+
+            st.subheader(
+                "📋 PRN Preview"
+            )
+
+            st.dataframe(
+                preview_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            prn_lines = []
+
+            for _, row in df.iterrows():
+
+                item = str(
+                    row["Item No."]
+                ).strip()
+
+                if (
+                    item == ""
+                    or
+                    item.lower() == "nan"
+                    or
+                    item.upper() == "TOTAL"
+                ):
+                    continue
+
+                qty = int(
+                    round(
+                        float(
+                            str(
+                                row["Qty"]
+                            ).replace(
+                                ",",
+                                "."
+                            )
+                        )
+                    )
+                )
+
+                price = float(
+                    str(
+                        row["Price 1 pc"]
+                    ).replace(
+                        ",",
+                        "."
+                    )
+                )
+
+                price_str = (
+                    f"{price:.6f}"
+                    .replace(".", ",")
+                )
+
+                spaces_before_qty = max(
+                    1,
+                    25
+                    -
+                    len(item)
+                    -
+                    len(str(qty))
+                )
+
+                line = (
+                    item
+                    +
+                    (
+                        " "
+                        *
+                        spaces_before_qty
+                    )
+                    +
+                    str(qty)
+                    +
+                    (
+                        " "
+                        * 6
+                    )
+                    +
+                    price_str
+                )
+
+                prn_lines.append(
+                    line
+                )
+
+            prn_content = (
+                "\r\n".join(
+                    prn_lines
+                )
+            )
+
+            invoice_name = (
+                uploaded_excel.name
+                .replace(".xlsx", "")
+                .replace(".xls", "")
+            )
+
+            st.download_button(
+                label="📥 Изтегли PRN",
+                data=prn_content.encode(
+                    "utf-8"
+                ),
+                file_name=(
+                    f"{invoice_name}.prn"
+                ),
+                mime="text/plain",
+                use_container_width=True
+            )
+
+            st.success(
+                f"PRN редове: "
+                f"{len(prn_lines)}"
+            )
+
+        except Exception as error:
+
+            st.error(
+                f"Грешка: {error}"
+            )
