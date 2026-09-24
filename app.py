@@ -772,9 +772,11 @@ def extract_castrol_rows(pdf_file):
                 if "ST" not in previous_line:
                     continue
             
+                st_part = previous_line.split("ST")[-1]
+
                 numbers = re.findall(
-                    r'\d+(?:,\d+|\.\d+)?',
-                    previous_line
+                    r'\d[\d,\.]*',
+                    st_part
                 )
                 st.write(
                     "NUMBERS:",
@@ -858,18 +860,18 @@ def extract_castrol_rows(pdf_file):
                 invoice_item = next_line
 
                 try:
-
-               qty = parse_european_number(
-                    numbers[0]
-                )
-                
-                price = parse_european_number(
-                    numbers[1]
-                )
-                
-                line_total = parse_european_number(
-                    numbers[2]
-                )
+    
+                   qty = parse_european_number(
+                        numbers[0]
+                    )
+                    
+                    price = parse_european_number(
+                        numbers[1]
+                    )
+                    
+                    line_total = parse_european_number(
+                        numbers[2]
+                    )
                 st.write(
                     f"FOUND: {invoice_item} | Qty={qty} | Price={price}"
                 )
