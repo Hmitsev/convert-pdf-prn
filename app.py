@@ -239,9 +239,7 @@ def load_vendors():
 # ======================================================
 
 vendors_df = load_vendors()
-st.write(vendors_df.head())
-# DEBUG
-st.write(vendors_df.head())
+
 # ======================================================
 # LOAD DATA
 # ======================================================
@@ -294,8 +292,9 @@ vendors_df["display"] = (
 )
 
 selected_vendor = st.selectbox(
-    "Избери доставчик",
-    vendors_df["display"]
+    "🚚 Избери доставчик",
+    vendors_df["display"],
+    index=0
 )
 
 selected_vendor_no = (
@@ -306,5 +305,20 @@ selected_vendor_no = (
 
 
 st.success(
-    f"Vendor: {selected_vendor_no}"
+    st.markdown(
+    f"""
+    <div style="
+        background:rgba(0,0,0,0.35);
+        padding:14px;
+        border-radius:12px;
+        border:1px solid rgba(255,255,255,0.15);
+        color:#00ff88;
+        font-size:18px;
+        font-weight:700;
+    ">
+        ✅ Избран Vendor:
+        {selected_vendor_no}
+    </div>
+    """,
+    unsafe_allow_html=True
 )
