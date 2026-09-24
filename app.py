@@ -964,7 +964,7 @@ def create_invoice_excel(result_df):
         worksheet.freeze_panes = "A2"
 
         worksheet.auto_filter.ref = (
-            f"A1:D{len(final_df) + 1}"
+            f"A1:E{len(final_df) + 1}"
         )
 
         worksheet.column_dimensions[
@@ -973,7 +973,7 @@ def create_invoice_excel(result_df):
 
         worksheet.column_dimensions[
             "B"
-        ].width = 32
+        ].width = 18
 
         worksheet.column_dimensions[
             "C"
@@ -981,7 +981,7 @@ def create_invoice_excel(result_df):
 
         worksheet.column_dimensions[
             "D"
-        ].width = 18
+        ].width = 12
 
         header_fill = PatternFill(
             fill_type="solid",
@@ -1071,7 +1071,7 @@ def create_invoice_excel(result_df):
 
             for column_number in range(
                 1,
-                5
+                6
             ):
 
                 worksheet.cell(
@@ -1090,7 +1090,7 @@ def create_invoice_excel(result_df):
 
         for column_number in range(
             1,
-            5
+            6
         ):
 
             total_cell = worksheet.cell(
