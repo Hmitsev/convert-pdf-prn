@@ -5,17 +5,6 @@ import base64
 import io
 import re
 import pdfplumber
-
-# Optional OCR fallback. The app continues to work with native PDF text
-# even when OCR dependencies are not installed.
-try:
-    import pytesseract
-    from PIL import Image
-    OCR_AVAILABLE = True
-except Exception:
-    pytesseract = None
-    Image = None
-    OCR_AVAILABLE = False
 from psycopg2.extras import RealDictCursor
 from openpyxl.styles import (
     Font,
@@ -541,443 +530,182 @@ def extract_invoice_number(
 
 
 # ======================================================
-# UNIVERSAL PDF / OCR INVOICE PARSER
+# EXTRACT REAL INVOICE PRODUCT ROWS
 # ======================================================
 
-UNIT_TOKENS = {
-    "EA", "ST", "PCS", "PC", "PCE", "KS", "KOM", "UNIT", "UN"
-}
-
-STOP_TOKENS = {
-    "INVOICE", "TOTAL", "SUBTOTAL", "AMOUNT", "CURRENCY", "DATE",
-    "PAGE", "VAT", "EUR", "USD", "BGN", "DESCRIPTION", "MATERIAL",
-    "COMMODITY", "WEIGHT", "ORIGIN", "COUNTRY", "DELIVERY"
-}
-
-
-def get_page_text(page):
-    """Get native PDF text first; use OCR only when native text is missing."""
-
-    native_text = page.extract_text(
-        x_tolerance=2,
-        y_tolerance=3
-    ) or ""
-
-    if len(re.sub(r"\s+", "", native_text)) >= 40:
-        return native_text, "native_text"
-
-    if not OCR_AVAILABLE:
-        return native_text, "no_text"
-
-    try:
-        image = page.to_image(resolution=300).original
-        ocr_text = pytesseract.image_to_string(
-            image,
-            config="--oem 3 --psm 6"
-        )
-        return ocr_text or native_text, "ocr"
-    except Exception:
-        return native_text, "ocr_failed"
-
-
-def build_parser_reference_indexes(cross_refs):
-    """Create fast lookup dictionaries from the selected vendor's Neon data."""
-
-    reference_index = {}
-    item_index = {}
-
-    for _, row in cross_refs.iterrows():
-        cross_reference_no = str(
-            row.get("cross_reference_no", "")
-        ).strip()
-        item_no = str(
-            row.get("item_no", "")
-        ).strip()
-
-        normalized_ref = normalize_item_number(
-            row.get(
-                "normalized_cross_reference",
-                cross_reference_no
-            )
-        )
-        normalized_item = normalize_item_number(
-            row.get(
-                "normalized_item_no",
-                item_no
-            )
-        )
-
-        payload = {
-            "cross_reference_no": cross_reference_no,
-            "item_no": item_no
-        }
-
-        if normalized_ref and normalized_ref not in reference_index:
-            reference_index[normalized_ref] = payload
-
-        if normalized_item and normalized_item not in item_index:
-            item_index[normalized_item] = payload
-
-    return reference_index, item_index
-
-
-def split_line_tokens(line):
-    """Keep product-code separators while removing surrounding punctuation."""
-
-    return re.findall(
-        r"[A-Z0-9][A-Z0-9._/\-]*",
-        str(line).upper()
-    )
-
-
-def find_known_code_in_line(line, reference_index, item_index):
-    """Find the longest 1-4 token phrase that exists in Neon."""
-
-    tokens = split_line_tokens(line)
-
-    candidates = []
-    max_words = min(4, len(tokens))
-
-    for width in range(1, max_words + 1):
-        for position in range(0, len(tokens) - width + 1):
-            raw_candidate = " ".join(
-                tokens[position:position + width]
-            )
-            normalized_candidate = normalize_item_number(
-                raw_candidate
-            )
-
-            if not normalized_candidate:
-                continue
-            if len(normalized_candidate) < 4:
-                continue
-            if not any(char.isdigit() for char in normalized_candidate):
-                continue
-            if normalized_candidate in STOP_TOKENS:
-                continue
-
-            if normalized_candidate in reference_index:
-                candidates.append((
-                    len(normalized_candidate),
-                    reference_index[normalized_candidate]["cross_reference_no"],
-                    normalized_candidate,
-                    "direct"
-                ))
-
-            elif normalized_candidate in item_index:
-                candidates.append((
-                    len(normalized_candidate),
-                    item_index[normalized_candidate]["item_no"],
-                    normalized_candidate,
-                    "item_no"
-                ))
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda value: value[0], reverse=True)
-    _, original_code, normalized_code, match_type = candidates[0]
-
-    return {
-        "invoice_item": original_code,
-        "normalized_invoice_item": normalized_code,
-        "detected_match_type": match_type
-    }
-
-
-def extract_number_tokens(line):
-    return re.findall(
-        r"(?<![A-Z0-9])[-+]?\d[\d.,]*(?![A-Z0-9])",
-        str(line).upper()
-    )
-
-
-def line_has_unit(line):
-    tokens = {
-        token.strip(".,:;()[]")
-        for token in str(line).upper().split()
-    }
-    return bool(tokens.intersection(UNIT_TOKENS))
-
-
-def score_numeric_layout(qty, price, total):
-    """Return a confidence score for a Qty / Price / Total combination."""
-
-    score = 0
-
-    if qty is not None and qty > 0:
-        score += 20
-    if price is not None and price >= 0:
-        score += 20
-
-    calculation_ok = True
-
-    if total is not None and qty is not None and price is not None:
-        expected = qty * price
-        tolerance = max(0.10, abs(total) * 0.03)
-        difference = abs(expected - total)
-        calculation_ok = difference <= tolerance
-
-        if calculation_ok:
-            score += 35
-        elif difference <= max(1.00, abs(total) * 0.10):
-            score += 15
-
-    return score, calculation_ok
-
-
-def choose_qty_price(lines, code_line_index):
-    """Inspect nearby lines and select the most plausible numeric layout."""
-
-    best = None
-
-    window_start = max(0, code_line_index - 2)
-    window_end = min(len(lines), code_line_index + 3)
-
-    for line_index in range(window_start, window_end):
-        line = lines[line_index]
-        raw_numbers = extract_number_tokens(line)
-        numbers = [
-            parse_european_number(value)
-            for value in raw_numbers
-        ]
-        numbers = [
-            value for value in numbers
-            if value is not None
-        ]
-
-        if len(numbers) < 2:
-            continue
-
-        # Invoice layouts usually place Qty, Unit Price and Line Total
-        # as the first three numeric values after the unit token.
-        candidate_sets = []
-
-        if len(numbers) >= 3:
-            candidate_sets.append((
-                numbers[0],
-                numbers[1],
-                numbers[2]
-            ))
-
-        # Some layouts repeat price and total later in the same line.
-        if len(numbers) >= 5:
-            candidate_sets.append((
-                numbers[0],
-                numbers[-2],
-                numbers[-1]
-            ))
-
-        # Without a total we can still keep a lower-confidence match.
-        candidate_sets.append((
-            numbers[0],
-            numbers[1],
-            None
-        ))
-
-        for qty, price, total in candidate_sets:
-            score, calculation_ok = score_numeric_layout(
-                qty,
-                price,
-                total
-            )
-
-            if line_has_unit(line):
-                score += 20
-            if line_index == code_line_index:
-                score += 15
-            elif abs(line_index - code_line_index) == 1:
-                score += 10
-
-            candidate = {
-                "qty": qty,
-                "price": price,
-                "line_total": total,
-                "calculation_ok": calculation_ok,
-                "numeric_line": line,
-                "confidence": min(score, 100)
-            }
-
-            if best is None or candidate["confidence"] > best["confidence"]:
-                best = candidate
-
-    return best
-
-
-def extract_classic_inline_rows(lines, page_number, source_type):
-    """Preserve support for Federal-Mogul-style inline rows."""
-
-    rows = []
-
-    pattern = re.compile(
-        r"^\s*"
-        r"([A-Z0-9][A-Z0-9\-./]+)"
-        r"\s+"
-        r"(\d+(?:[.,]\d+)?)"
-        r"\s+(?:EA|ST|PCS|PC|PCE|KS|KOM|UNIT|UN)"
-        r"\s+"
-        r"([\d.,]+)"
-        r"\s+"
-        r"([\d.,]+)"
-        r"(?:\s+([\d.,]+)\s+([\d.,]+))?",
-        re.IGNORECASE
-    )
-
-    for line in lines:
-        match = pattern.match(line)
-        if not match:
-            continue
-
-        invoice_item = match.group(1).strip()
-        quantity = parse_european_number(match.group(2))
-        first_price = parse_european_number(match.group(3))
-        first_total = parse_european_number(match.group(4))
-        second_price = (
-            parse_european_number(match.group(5))
-            if match.group(5)
-            else None
-        )
-        second_total = (
-            parse_european_number(match.group(6))
-            if match.group(6)
-            else None
-        )
-
-        price = second_price if second_price is not None else first_price
-        total = second_total if second_total is not None else first_total
-
-        score, calculation_ok = score_numeric_layout(
-            quantity,
-            price,
-            total
-        )
-
-        if quantity is None or price is None:
-            continue
-
-        rows.append({
-            "invoice_item": invoice_item,
-            "normalized_invoice_item": normalize_item_number(invoice_item),
-            "qty": quantity,
-            "price": price,
-            "line_total": total,
-            "calculation_ok": calculation_ok,
-            "page": page_number,
-            "source_line": line,
-            "source_type": source_type,
-            "confidence": min(score + 25, 100)
-        })
-
-    return rows
-
-
-def extract_invoice_rows(pdf_file, cross_refs):
-    """
-    Universal hybrid parser:
-    1. native PDF text;
-    2. OCR fallback for scanned pages;
-    3. known-code matching against Neon;
-    4. nearby Qty / Price / Total extraction;
-    5. classic inline-row fallback.
-    """
+def extract_federal_rows(pdf_file):
 
     extracted_rows = []
     complete_text = ""
     processed_pages = 0
-    page_sources = []
 
-    reference_index, item_index = build_parser_reference_indexes(
-        cross_refs
+    # Примери:
+    # PE-BJ-3322 18 EA 20,25 364,50 20,25 364,50
+    # AU-ES-3721 54 EA 4,68 252,72 4,68 252,72
+
+    row_pattern = re.compile(
+        r"^\s*"
+        r"([A-Z0-9][A-Z0-9\-./]+)"
+        r"\s+"
+        r"(\d+(?:[.,]\d+)?)"
+        r"\s+EA"
+        r"\s+"
+        r"([\d.,]+)"
+        r"\s+"
+        r"([\d.,]+)"
+        r"(?:"
+        r"\s+"
+        r"([\d.,]+)"
+        r"\s+"
+        r"([\d.,]+)"
+        r")?",
+        re.IGNORECASE
     )
 
     pdf_file.seek(0)
 
     with pdfplumber.open(pdf_file) as pdf:
-        for page_number, page in enumerate(pdf.pages, start=1):
+
+        for page_number, page in enumerate(
+            pdf.pages,
+            start=1
+        ):
+
             processed_pages += 1
 
-            page_text, source_type = get_page_text(page)
-            page_sources.append(source_type)
+            page_text = page.extract_text(
+                x_tolerance=2,
+                y_tolerance=3
+            )
 
             if not page_text:
                 continue
 
             complete_text += page_text + "\n"
-            lines = [
-                " ".join(str(line).split())
-                for line in page_text.splitlines()
-                if str(line).strip()
-            ]
 
-            page_rows = []
-            used_codes = set()
+            for line in page_text.splitlines():
 
-            # Universal Neon-anchored extraction. This handles layouts where
-            # code and numeric columns are on the same or neighbouring lines.
-            for line_index, line in enumerate(lines):
-                found = find_known_code_in_line(
-                    line,
-                    reference_index,
-                    item_index
+                clean_line = " ".join(
+                    str(line).split()
                 )
 
-                if not found:
-                    continue
-
-                normalized_code = found["normalized_invoice_item"]
-                if normalized_code in used_codes:
-                    continue
-
-                numeric_data = choose_qty_price(
-                    lines,
-                    line_index
+                match = row_pattern.match(
+                    clean_line
                 )
 
-                if not numeric_data:
+                if not match:
                     continue
 
-                used_codes.add(normalized_code)
+                invoice_item = (
+                    match.group(1).strip()
+                )
 
-                page_rows.append({
-                    "invoice_item": found["invoice_item"],
-                    "normalized_invoice_item": normalized_code,
-                    "qty": numeric_data["qty"],
-                    "price": numeric_data["price"],
-                    "line_total": numeric_data["line_total"],
-                    "calculation_ok": numeric_data["calculation_ok"],
-                    "page": page_number,
-                    "source_line": (
-                        f"{line} | {numeric_data['numeric_line']}"
-                    ),
-                    "source_type": source_type,
-                    "confidence": numeric_data["confidence"]
+                quantity = parse_european_number(
+                    match.group(2)
+                )
+
+                first_unit_price = (
+                    parse_european_number(
+                        match.group(3)
+                    )
+                )
+
+                first_line_total = (
+                    parse_european_number(
+                        match.group(4)
+                    )
+                )
+
+                second_unit_price = (
+                    parse_european_number(
+                        match.group(5)
+                    )
+                    if match.group(5)
+                    else None
+                )
+
+                second_line_total = (
+                    parse_european_number(
+                        match.group(6)
+                    )
+                    if match.group(6)
+                    else None
+                )
+
+                # Ако има повторена Net Unit Price,
+                # използваме втората цена.
+                unit_price = (
+                    second_unit_price
+                    if second_unit_price is not None
+                    else first_unit_price
+                )
+
+                line_total = (
+                    second_line_total
+                    if second_line_total is not None
+                    else first_line_total
+                )
+
+                if quantity is None:
+                    continue
+
+                if unit_price is None:
+                    continue
+
+                if quantity <= 0:
+                    continue
+
+                if unit_price < 0:
+                    continue
+
+                calculation_ok = True
+
+                if line_total is not None:
+
+                    expected_total = (
+                        quantity * unit_price
+                    )
+
+                    tolerance = max(
+                        0.05,
+                        abs(line_total) * 0.01
+                    )
+
+                    calculation_ok = (
+                        abs(
+                            expected_total
+                            - line_total
+                        )
+                        <= tolerance
+                    )
+
+                extracted_rows.append({
+                    "invoice_item":
+                        invoice_item,
+
+                    "normalized_invoice_item":
+                        normalize_item_number(
+                            invoice_item
+                        ),
+
+                    "qty":
+                        quantity,
+
+                    "price":
+                        unit_price,
+
+                    "line_total":
+                        line_total,
+
+                    "calculation_ok":
+                        calculation_ok,
+
+                    "page":
+                        page_number,
+
+                    "source_line":
+                        clean_line
                 })
-
-            # Keep the proven inline parser as a second path.
-            inline_rows = extract_classic_inline_rows(
-                lines,
-                page_number,
-                source_type
-            )
-
-            page_rows.extend(inline_rows)
-            extracted_rows.extend(page_rows)
-
-    # Remove exact extraction duplicates while preserving page order.
-    unique_rows = []
-    seen = set()
-
-    for row in extracted_rows:
-        key = (
-            row["page"],
-            row["normalized_invoice_item"],
-            row["qty"],
-            row["price"]
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_rows.append(row)
 
     invoice_number = extract_invoice_number(
         complete_text,
@@ -985,14 +713,151 @@ def extract_invoice_rows(pdf_file, cross_refs):
     )
 
     return {
-        "invoice_number": invoice_number,
-        "pages": processed_pages,
-        "rows": unique_rows,
-        "page_sources": page_sources,
-        "ocr_available": OCR_AVAILABLE
+        "invoice_number":
+            invoice_number,
+
+        "pages":
+            processed_pages,
+
+        "rows":
+            extracted_rows
     }
 
+# ======================================================
+# CASTROL PARSER
+# ======================================================
 
+def extract_castrol_rows(pdf_file):
+
+    rows = []
+    full_text = ""
+
+    pdf_file.seek(0)
+
+    with pdfplumber.open(pdf_file) as pdf:
+
+        for page_number, page in enumerate(
+            pdf.pages,
+            start=1
+        ):
+
+            page_text = page.extract_text()
+
+            if not page_text:
+                continue
+
+            full_text += page_text + "\n"
+
+            lines = [
+                line.strip()
+                for line in page_text.splitlines()
+                if line.strip()
+            ]
+
+            for index in range(len(lines)):
+
+                current_line = lines[index]
+
+                # Пример:
+                # 15F710
+                # 15FFAE
+                # 15BF39
+
+                if not re.match(
+                    r'^[A-Z0-9]{5,10}$',
+                    current_line
+                ):
+                    continue
+
+                invoice_item = current_line
+
+                qty = None
+                price = None
+
+                search_end = min(
+                    index + 4,
+                    len(lines)
+                )
+
+                for j in range(
+                    index + 1,
+                    search_end
+                ):
+
+                    numeric_line = lines[j]
+
+                    if "ST" not in numeric_line:
+                        continue
+
+                    numbers = re.findall(
+                        r'\d+(?:\.\d+)?',
+                        numeric_line
+                    )
+
+                    if len(numbers) >= 3:
+
+                        try:
+
+                            qty = float(
+                                numbers[0]
+                            )
+
+                            price = float(
+                                numbers[1]
+                            )
+
+                            break
+
+                        except Exception:
+
+                            pass
+
+                if (
+                    qty is not None
+                    and
+                    price is not None
+                ):
+
+                    rows.append({
+                        "invoice_item":
+                            invoice_item,
+
+                        "normalized_invoice_item":
+                            normalize_item_number(
+                                invoice_item
+                            ),
+
+                        "qty":
+                            qty,
+
+                        "price":
+                            price,
+
+                        "page":
+                            page_number,
+
+                        "source_line":
+                            current_line,
+
+                        "calculation_ok":
+                            True
+                    })
+
+    invoice_number = extract_invoice_number(
+        full_text,
+        pdf_file.name
+    )
+
+    return {
+        "invoice_number":
+            invoice_number,
+
+        "pages":
+            len(pdf.pages),
+
+        "rows":
+            rows
+    }
 # ======================================================
 # BUILD FAST CROSS-REFERENCE INDEXES
 # ======================================================
@@ -1215,13 +1080,7 @@ def match_invoice_rows(
             "_calculation_ok":
                 invoice_row[
                     "calculation_ok"
-                ],
-
-            "Confidence":
-                invoice_row.get("confidence", 0),
-
-            "Source":
-                invoice_row.get("source_type", "native_text")
+                ]
         })
 
     return pd.DataFrame(
@@ -1502,8 +1361,6 @@ if page == "📄 PDF → Excel":
         processed_pages = 0
         detected_invoice_rows = 0
         invoice_numbers = []
-        parser_sources = []
-        ocr_available = OCR_AVAILABLE
 
         with st.spinner(
             "Разпознаване на фактурните позиции..."
@@ -1511,19 +1368,22 @@ if page == "📄 PDF → Excel":
 
             for pdf_file in uploaded_pdfs:
 
-                extracted = extract_invoice_rows(
-                    pdf_file,
-                    cross_refs
-                )
+                if selected_vendor_no == "VEN0002914":
+
+                    extracted = extract_castrol_rows(
+                        pdf_file
+                    )
+                
+                else:
+                
+                    extracted = extract_federal_rows(
+                        pdf_file
+                    )
 
                 invoice_numbers.append(
                     extracted[
                         "invoice_number"
                     ]
-                )
-
-                parser_sources.extend(
-                    extracted.get("page_sources", [])
                 )
 
                 processed_pages += extracted[
@@ -1612,16 +1472,8 @@ if page == "📄 PDF → Excel":
             ).sum()
         )
 
-        average_confidence = round(
-            pd.to_numeric(
-                final_result_df["Confidence"],
-                errors="coerce"
-            ).fillna(0).mean(),
-            1
-        )
-
-        col1, col2, col3, col4, col5 = (
-            st.columns(5)
+        col1, col2, col3, col4 = (
+            st.columns(4)
         )
 
         with col1:
@@ -1652,27 +1504,6 @@ if page == "📄 PDF → Excel":
                 not_found_count
             )
 
-        with col5:
-
-            st.metric(
-                "🎯 Увереност",
-                f"{average_confidence}%"
-            )
-
-        source_summary = ", ".join(
-            sorted(set(parser_sources))
-        ) or "unknown"
-
-        if not ocr_available and "no_text" in parser_sources:
-            st.warning(
-                "Има страници без извличаем текст. За сканирани PDF файлове "
-                "добави pytesseract и системния пакет tesseract-ocr."
-            )
-
-        st.caption(
-            f"Parser source: {source_summary}"
-        )
-
         st.info(
             f"Открити фактурни позиции: "
             f"{detected_invoice_rows} | "
@@ -1687,9 +1518,7 @@ if page == "📄 PDF → Excel":
                 "Item No.",
                 "Cross-Reference No.",
                 "Qty",
-                "Price 1 pc",
-                "Confidence",
-                "Source"
+                "Price 1 pc"
             ]
         ].copy()
 
@@ -1697,28 +1526,11 @@ if page == "📄 PDF → Excel":
             "📋 Разпознати фактурни позиции"
         )
 
-        edited_preview_df = st.data_editor(
+        st.dataframe(
             preview_df,
             use_container_width=True,
-            hide_index=True,
-            num_rows="dynamic",
-            disabled=[
-                "Cross-Reference Type No.",
-                "Confidence",
-                "Source"
-            ],
-            key="universal_invoice_editor"
+            hide_index=True
         )
-
-        export_result_df = edited_preview_df[
-            [
-                "Cross-Reference Type No.",
-                "Item No.",
-                "Cross-Reference No.",
-                "Qty",
-                "Price 1 pc"
-            ]
-        ].copy()
 
         st.caption(
             "⚠️ = намерен чрез Item No. | "
@@ -1743,7 +1555,7 @@ if page == "📄 PDF → Excel":
             )
 
         excel_output = create_invoice_excel(
-            export_result_df
+            final_result_df
         )
 
         st.download_button(
@@ -1768,8 +1580,9 @@ if page == "🧾 Excel → PRN":
         <div class="main-card">
             <h2>🧾 Excel → PRN</h2>
             <p>
-            Качи Excel във формат Invoice, Item, Qty, Price 1 pc.
-            Този модул е независим от PDF → Excel.
+            Качи Excel, генериран от PDF → Excel.
+            За PRN се използва колоната Item No.
+            (вътрешният Inter Cars номер).
             </p>
         </div>
         """,
