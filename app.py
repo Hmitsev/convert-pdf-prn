@@ -849,13 +849,16 @@ def match_invoice_rows(
         matched_rows.append({
             "Cross-Reference Type No.":
                 selected_vendor_no,
-
+        
+            "Item No.":
+                invoice_item,
+        
             "Cross-Reference No.":
                 output_cross_reference,
-
+        
             "Qty":
                 quantity,
-
+        
             "Price 1 pc":
                 price,
 
@@ -894,6 +897,7 @@ def create_invoice_excel(result_df):
     export_df = result_df[
         [
             "Cross-Reference Type No.",
+            "Item No.",
             "Cross-Reference No.",
             "Qty",
             "Price 1 pc"
@@ -1301,13 +1305,14 @@ if page == "📄 PDF → Excel":
         )
 
         preview_df = final_result_df[
-            [
-                "Cross-Reference Type No.",
-                "Cross-Reference No.",
-                "Qty",
-                "Price 1 pc"
-            ]
-        ].copy()
+    [
+        "Cross-Reference Type No.",
+        "Item No.",
+        "Cross-Reference No.",
+        "Qty",
+        "Price 1 pc"
+    ]
+].copy()
 
         st.subheader(
             "📋 Разпознати фактурни позиции"
