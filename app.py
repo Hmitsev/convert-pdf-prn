@@ -770,6 +770,9 @@ def extract_castrol_rows(pdf_file):
                     continue
 
                 invoice_item = current_line
+                st.write(
+                    f"CASTROL CODE FOUND: {invoice_item}"
+                )
 
                 qty = None
                 price = None
@@ -823,6 +826,12 @@ def extract_castrol_rows(pdf_file):
                         except Exception:
 
                             pass
+                            st.write(
+                                "CHECK:",
+                                invoice_item,
+                                qty,
+                                price
+                            )
 
                 if (
                     qty is not None
