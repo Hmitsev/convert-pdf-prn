@@ -1371,7 +1371,7 @@ if page == "📄 PDF → Excel":
             use_container_width=True,
             key="download_invoice_excel"
         )
-        # ======================================================
+# ======================================================
 # EXCEL → PRN
 # ======================================================
 
@@ -1382,7 +1382,7 @@ if page == "🧾 Excel → PRN":
         <div class="main-card">
             <h2>🧾 Excel → PRN</h2>
             <p>
-            Качи Excel файлан генериран от PDF → Excel.
+            Качи Excel, генериран от PDF → Excel.
             За PRN се използва колоната Item No.
             (вътрешният Inter Cars номер).
             </p>
@@ -1417,8 +1417,9 @@ if page == "🧾 Excel → PRN":
             ]
 
             missing = [
-                c for c in required_cols
-                if c not in df.columns
+                col
+                for col in required_cols
+                if col not in df.columns
             ]
 
             if missing:
@@ -1470,10 +1471,7 @@ if page == "🧾 Excel → PRN":
                         float(
                             str(
                                 row["Qty"]
-                            ).replace(
-                                ",",
-                                "."
-                            )
+                            ).replace(",", ".")
                         )
                     )
                 )
@@ -1481,10 +1479,7 @@ if page == "🧾 Excel → PRN":
                 price = float(
                     str(
                         row["Price 1 pc"]
-                    ).replace(
-                        ",",
-                        "."
-                    )
+                    ).replace(",", ".")
                 )
 
                 price_str = (
@@ -1495,29 +1490,16 @@ if page == "🧾 Excel → PRN":
                 spaces_before_qty = max(
                     1,
                     25
-                    -
-                    len(item)
-                    -
-                    len(str(qty))
+                    - len(item)
+                    - len(str(qty))
                 )
 
                 line = (
                     item
-                    +
-                    (
-                        " "
-                        *
-                        spaces_before_qty
-                    )
-                    +
-                    str(qty)
-                    +
-                    (
-                        " "
-                        * 6
-                    )
-                    +
-                    price_str
+                    + (" " * spaces_before_qty)
+                    + str(qty)
+                    + (" " * 6)
+                    + price_str
                 )
 
                 prn_lines.append(
@@ -1541,15 +1523,13 @@ if page == "🧾 Excel → PRN":
                 data=prn_content.encode(
                     "utf-8"
                 ),
-                file_name=(
-                    f"{invoice_name}.prn"
-                ),
+                file_name=f"{invoice_name}.prn",
                 mime="text/plain",
                 use_container_width=True
             )
 
             st.success(
-                f"PRN редове: "
+                f"✅ Генерирани редове: "
                 f"{len(prn_lines)}"
             )
 
