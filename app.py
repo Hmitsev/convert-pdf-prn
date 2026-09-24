@@ -784,20 +784,43 @@ def extract_castrol_rows(pdf_file):
                 qty = None
                 price = None
 
-                search_end = min(
-                    index + 12,
-                    len(lines)
+                search_start = max(
+                    0,
+                    index - 8
                 )
-
+                
                 for j in range(
-                    index + 1,
-                    search_end
+                    search_start,
+                    index
                 ):
 
                     numeric_line = lines[j]
 
                     if "ST" not in numeric_line:
                         continue
+                        numbers = re.findall(
+                            r'\d+(?:,\d+|\.\d+)?',
+                            numeric_line
+                        )
+                        
+                        if len(numbers) < 3:
+                            continue
+                        
+                        try:
+                        
+                            qty = float(
+                                numbers[-3].replace(",", "")
+                            )
+                        
+                            price = float(
+                                numbers[-2].replace(",", "")
+                            )
+                        
+                            break
+                        
+                        except Exception:
+                            pass
+                    
                         print(
                             "CASTROL CHECK:",
                             invoice_item,
