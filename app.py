@@ -332,7 +332,7 @@ selected_vendor_no = (
 
 
 st.success(
-    st.markdown(
+st.markdown(
     f"""
     <div style="
         background:rgba(0,0,0,0.35);
