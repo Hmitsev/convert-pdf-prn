@@ -1323,7 +1323,6 @@ if page == "📄 PDF → Excel":
                 "Qty",
                 "Price 1 pc"
             ]
-        ]
         ].copy()
 
         st.subheader(
