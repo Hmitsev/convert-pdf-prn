@@ -6,6 +6,7 @@ import io
 import re
 import pdfplumber
 from psycopg2.extras import RealDictCursor
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
 
 # ======================================================
@@ -351,7 +352,748 @@ def load_cross_references(vendor_no):
 
     return df
 
+# ======================================================
+# ITEM NORMALIZATION
+# ======================================================
 
+def normalize_item_number(value):
+
+    if value is None:
+        return ""
+
+    text = str(value).strip().upper()
+
+    if text.lower() in {
+        "",
+        "nan",
+        "none",
+        "null"
+    }:
+        return ""
+
+    return re.sub(
+        r"[^A-Z0-9]",
+        "",
+        text
+    )
+
+
+# ======================================================
+# EUROPEAN NUMBER PARSER
+# ======================================================
+
+def parse_european_number(value):
+
+    if value is None:
+        return None
+
+    text = str(value).strip()
+
+    if not text:
+        return None
+
+    text = re.sub(
+        r"[^\d,.\-]",
+        "",
+        text
+    )
+
+    if not text:
+        return None
+
+    try:
+
+        # Пример: 2.121,60 -> 2121.60
+        if "," in text and "." in text:
+
+            if text.rfind(",") > text.rfind("."):
+
+                text = (
+                    text
+                    .replace(".", "")
+                    .replace(",", ".")
+                )
+
+            else:
+
+                text = text.replace(",", "")
+
+        # Пример: 20,25 -> 20.25
+        elif "," in text:
+
+            text = text.replace(",", ".")
+
+        return float(text)
+
+    except Exception:
+
+        return None
+
+
+# ======================================================
+# EXTRACT INVOICE NUMBER
+# ======================================================
+
+def extract_invoice_number(
+    complete_text,
+    fallback_file_name
+):
+
+    patterns = [
+        r"Invoice\s+Number\s+(\d+)",
+        r"Invoice\s+No\.?\s*(\d+)",
+        r"Invoice\s*#\s*(\d+)"
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            complete_text,
+            re.IGNORECASE
+        )
+
+        if match:
+
+            return match.group(1)
+
+    return re.sub(
+        r"\.pdf$",
+        "",
+        fallback_file_name,
+        flags=re.IGNORECASE
+    )
+
+
+# ======================================================
+# EXTRACT REAL INVOICE PRODUCT ROWS
+# ======================================================
+
+def extract_invoice_rows(pdf_file):
+
+    extracted_rows = []
+    complete_text = ""
+    processed_pages = 0
+
+    # Примери:
+    # PE-BJ-3322 18 EA 20,25 364,50 20,25 364,50
+    # AU-ES-3721 54 EA 4,68 252,72 4,68 252,72
+
+    row_pattern = re.compile(
+        r"^\s*"
+        r"([A-Z0-9][A-Z0-9\-./]+)"
+        r"\s+"
+        r"(\d+(?:[.,]\d+)?)"
+        r"\s+EA"
+        r"\s+"
+        r"([\d.,]+)"
+        r"\s+"
+        r"([\d.,]+)"
+        r"(?:"
+        r"\s+"
+        r"([\d.,]+)"
+        r"\s+"
+        r"([\d.,]+)"
+        r")?",
+        re.IGNORECASE
+    )
+
+    pdf_file.seek(0)
+
+    with pdfplumber.open(pdf_file) as pdf:
+
+        for page_number, page in enumerate(
+            pdf.pages,
+            start=1
+        ):
+
+            processed_pages += 1
+
+            page_text = page.extract_text(
+                x_tolerance=2,
+                y_tolerance=3
+            )
+
+            if not page_text:
+                continue
+
+            complete_text += page_text + "\n"
+
+            for line in page_text.splitlines():
+
+                clean_line = " ".join(
+                    str(line).split()
+                )
+
+                match = row_pattern.match(
+                    clean_line
+                )
+
+                if not match:
+                    continue
+
+                invoice_item = (
+                    match.group(1).strip()
+                )
+
+                quantity = parse_european_number(
+                    match.group(2)
+                )
+
+                first_unit_price = (
+                    parse_european_number(
+                        match.group(3)
+                    )
+                )
+
+                first_line_total = (
+                    parse_european_number(
+                        match.group(4)
+                    )
+                )
+
+                second_unit_price = (
+                    parse_european_number(
+                        match.group(5)
+                    )
+                    if match.group(5)
+                    else None
+                )
+
+                second_line_total = (
+                    parse_european_number(
+                        match.group(6)
+                    )
+                    if match.group(6)
+                    else None
+                )
+
+                # Ако има повторена Net Unit Price,
+                # използваме втората цена.
+                unit_price = (
+                    second_unit_price
+                    if second_unit_price is not None
+                    else first_unit_price
+                )
+
+                line_total = (
+                    second_line_total
+                    if second_line_total is not None
+                    else first_line_total
+                )
+
+                if quantity is None:
+                    continue
+
+                if unit_price is None:
+                    continue
+
+                if quantity <= 0:
+                    continue
+
+                if unit_price < 0:
+                    continue
+
+                calculation_ok = True
+
+                if line_total is not None:
+
+                    expected_total = (
+                        quantity * unit_price
+                    )
+
+                    tolerance = max(
+                        0.05,
+                        abs(line_total) * 0.01
+                    )
+
+                    calculation_ok = (
+                        abs(
+                            expected_total
+                            - line_total
+                        )
+                        <= tolerance
+                    )
+
+                extracted_rows.append({
+                    "invoice_item":
+                        invoice_item,
+
+                    "normalized_invoice_item":
+                        normalize_item_number(
+                            invoice_item
+                        ),
+
+                    "qty":
+                        quantity,
+
+                    "price":
+                        unit_price,
+
+                    "line_total":
+                        line_total,
+
+                    "calculation_ok":
+                        calculation_ok,
+
+                    "page":
+                        page_number,
+
+                    "source_line":
+                        clean_line
+                })
+
+    invoice_number = extract_invoice_number(
+        complete_text,
+        pdf_file.name
+    )
+
+    return {
+        "invoice_number":
+            invoice_number,
+
+        "pages":
+            processed_pages,
+
+        "rows":
+            extracted_rows
+    }
+
+
+# ======================================================
+# BUILD FAST CROSS-REFERENCE INDEXES
+# ======================================================
+
+def build_cross_reference_indexes(
+    cross_refs
+):
+
+    direct_index = {}
+    item_index = {}
+
+    for _, row in cross_refs.iterrows():
+
+        vendor_no = str(
+            row.get(
+                "vendor_no",
+                ""
+            )
+        ).strip()
+
+        cross_reference_no = str(
+            row.get(
+                "cross_reference_no",
+                ""
+            )
+        ).strip()
+
+        item_no = str(
+            row.get(
+                "item_no",
+                ""
+            )
+        ).strip()
+
+        normalized_cross_reference = (
+            normalize_item_number(
+                row.get(
+                    "normalized_cross_reference",
+                    cross_reference_no
+                )
+            )
+        )
+
+        normalized_item_no = (
+            normalize_item_number(
+                row.get(
+                    "normalized_item_no",
+                    item_no
+                )
+            )
+        )
+
+        if normalized_cross_reference:
+
+            if (
+                normalized_cross_reference
+                not in direct_index
+            ):
+
+                direct_index[
+                    normalized_cross_reference
+                ] = {
+                    "vendor_no":
+                        vendor_no,
+
+                    "cross_reference_no":
+                        cross_reference_no,
+
+                    "item_no":
+                        item_no
+                }
+
+        if normalized_item_no:
+
+            if (
+                normalized_item_no
+                not in item_index
+            ):
+
+                item_index[
+                    normalized_item_no
+                ] = {
+                    "vendor_no":
+                        vendor_no,
+
+                    "cross_reference_no":
+                        cross_reference_no,
+
+                    "item_no":
+                        item_no
+                }
+
+    return direct_index, item_index
+
+
+# ======================================================
+# MATCH INVOICE ROWS TO NEON
+# ======================================================
+
+def match_invoice_rows(
+    invoice_rows,
+    selected_vendor_no,
+    cross_refs
+):
+
+    (
+        direct_index,
+        item_index
+    ) = build_cross_reference_indexes(
+        cross_refs
+    )
+
+    matched_rows = []
+
+    for invoice_row in invoice_rows:
+
+        invoice_item = invoice_row[
+            "invoice_item"
+        ]
+
+        normalized_item = invoice_row[
+            "normalized_invoice_item"
+        ]
+
+        quantity = invoice_row["qty"]
+        price = invoice_row["price"]
+
+        match_status = "not_found"
+
+        output_cross_reference = (
+            f"❗ {invoice_item}"
+        )
+
+        internal_item_no = ""
+
+        # ======================================
+        # DIRECT CROSS REFERENCE
+        # ======================================
+
+        if normalized_item in direct_index:
+
+            reference = direct_index[
+                normalized_item
+            ]
+
+            output_cross_reference = (
+                reference[
+                    "cross_reference_no"
+                ]
+            )
+
+            internal_item_no = (
+                reference["item_no"]
+            )
+
+            match_status = "direct"
+
+        # ======================================
+        # FALLBACK THROUGH ITEM NO.
+        # ======================================
+
+        elif normalized_item in item_index:
+
+            reference = item_index[
+                normalized_item
+            ]
+
+            output_cross_reference = (
+                "⚠️ "
+                + reference[
+                    "cross_reference_no"
+                ]
+            )
+
+            internal_item_no = (
+                reference["item_no"]
+            )
+
+            match_status = "item_no"
+
+        matched_rows.append({
+            "Cross-Reference Type No.":
+                selected_vendor_no,
+
+            "Cross-Reference No.":
+                output_cross_reference,
+
+            "Qty":
+                quantity,
+
+            "Price 1 pc":
+                price,
+
+            "_invoice_item":
+                invoice_item,
+
+            "_internal_item_no":
+                internal_item_no,
+
+            "_status":
+                match_status,
+
+            "_page":
+                invoice_row["page"],
+
+            "_line_total":
+                invoice_row["line_total"],
+
+            "_calculation_ok":
+                invoice_row[
+                    "calculation_ok"
+                ]
+        })
+
+    return pd.DataFrame(
+        matched_rows
+    )
+
+
+# ======================================================
+# CREATE EXCEL
+# ======================================================
+
+def create_invoice_excel(result_df):
+
+    export_df = result_df[
+        [
+            "Cross-Reference Type No.",
+            "Cross-Reference No.",
+            "Qty",
+            "Price 1 pc"
+        ]
+    ].copy()
+
+    grand_total = (
+        pd.to_numeric(
+            export_df["Qty"],
+            errors="coerce"
+        )
+        *
+        pd.to_numeric(
+            export_df["Price 1 pc"],
+            errors="coerce"
+        )
+    ).sum()
+
+    total_row = pd.DataFrame([
+        {
+            "Cross-Reference Type No.": "",
+            "Cross-Reference No.": "TOTAL",
+            "Qty": "",
+            "Price 1 pc": grand_total
+        }
+    ])
+
+    final_df = pd.concat(
+        [
+            export_df,
+            total_row
+        ],
+        ignore_index=True
+    )
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        final_df.to_excel(
+            writer,
+            sheet_name="Invoice",
+            index=False
+        )
+
+        worksheet = writer.sheets[
+            "Invoice"
+        ]
+
+        worksheet.freeze_panes = "A2"
+
+        worksheet.auto_filter.ref = (
+            f"A1:D{len(final_df) + 1}"
+        )
+
+        worksheet.column_dimensions[
+            "A"
+        ].width = 28
+
+        worksheet.column_dimensions[
+            "B"
+        ].width = 30
+
+        worksheet.column_dimensions[
+            "C"
+        ].width = 14
+
+        worksheet.column_dimensions[
+            "D"
+        ].width = 18
+
+        header_fill = PatternFill(
+            fill_type="solid",
+            fgColor="D71919"
+        )
+
+        header_font = Font(
+            color="FFFFFF",
+            bold=True
+        )
+
+        thin_border = Border(
+            left=Side(
+                style="thin",
+                color="D9D9D9"
+            ),
+            right=Side(
+                style="thin",
+                color="D9D9D9"
+            ),
+            top=Side(
+                style="thin",
+                color="D9D9D9"
+            ),
+            bottom=Side(
+                style="thin",
+                color="D9D9D9"
+            )
+        )
+
+        for cell in worksheet[1]:
+
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center"
+            )
+
+        last_product_row = (
+            len(export_df) + 1
+        )
+
+        for excel_row in range(
+            2,
+            last_product_row + 1
+        ):
+
+            reference_cell = worksheet.cell(
+                row=excel_row,
+                column=2
+            )
+
+            reference_value = str(
+                reference_cell.value or ""
+            )
+
+            if reference_value.startswith(
+                "⚠️"
+            ):
+
+                reference_cell.font = Font(
+                    bold=True,
+                    color="FF8C00"
+                )
+
+            elif reference_value.startswith(
+                "❗"
+            ):
+
+                reference_cell.font = Font(
+                    bold=True,
+                    color="FF0000"
+                )
+
+            worksheet.cell(
+                row=excel_row,
+                column=3
+            ).number_format = "0.###"
+
+            worksheet.cell(
+                row=excel_row,
+                column=4
+            ).number_format = "0.000000"
+
+            for column_number in range(
+                1,
+                5
+            ):
+
+                worksheet.cell(
+                    row=excel_row,
+                    column=column_number
+                ).border = thin_border
+
+        total_excel_row = (
+            len(final_df) + 1
+        )
+
+        total_fill = PatternFill(
+            fill_type="solid",
+            fgColor="FFF2CC"
+        )
+
+        for column_number in range(
+            1,
+            5
+        ):
+
+            total_cell = worksheet.cell(
+                row=total_excel_row,
+                column=column_number
+            )
+
+            total_cell.fill = total_fill
+
+            total_cell.font = Font(
+                bold=True,
+                color="C00000"
+            )
+
+            total_cell.border = thin_border
+
+        worksheet.cell(
+            row=total_excel_row,
+            column=4
+        ).number_format = "0.00"
+
+    output.seek(0)
+
+    return output
 # ======================================================
 # PDF → EXCEL
 # ======================================================
@@ -363,9 +1105,10 @@ if page == "📄 PDF → Excel":
         <div class="main-card">
             <h2>📄 PDF → Excel</h2>
             <p>
-            Качи PDF фактура и приложението ще
-            намери Cross Reference номерата
-            за избрания Vendor.
+                Качи PDF фактура. Приложението ще
+                извлече реалните продуктови позиции,
+                количество и единична цена, след което
+                ще провери номерата в Neon.
             </p>
         </div>
         """,
@@ -373,7 +1116,7 @@ if page == "📄 PDF → Excel":
     )
 
     uploaded_pdfs = st.file_uploader(
-        "📄 Качи PDF фактура",
+        "📄 Качи една или няколко PDF фактури",
         type=["pdf"],
         accept_multiple_files=True,
         key="pdf_upload_main"
@@ -382,222 +1125,228 @@ if page == "📄 PDF → Excel":
     if uploaded_pdfs:
 
         with st.spinner(
-            "Зареждане на Cross References..."
+            "Зареждане на Cross References от Neon..."
         ):
 
             cross_refs = load_cross_references(
                 selected_vendor_no
             )
 
+        if cross_refs.empty:
+
+            st.error(
+                f"Няма Cross References за "
+                f"{selected_vendor_no}."
+            )
+
+            st.stop()
+
         st.success(
-            f"Cross References: {len(cross_refs)}"
+            f"Cross References в Neon: "
+            f"{len(cross_refs)}"
+        )
+
+        all_results = []
+        processed_pages = 0
+        detected_invoice_rows = 0
+        invoice_numbers = []
+
+        with st.spinner(
+            "Разпознаване на фактурните позиции..."
+        ):
+
+            for pdf_file in uploaded_pdfs:
+
+                extracted = extract_invoice_rows(
+                    pdf_file
+                )
+
+                invoice_numbers.append(
+                    extracted[
+                        "invoice_number"
+                    ]
+                )
+
+                processed_pages += extracted[
+                    "pages"
+                ]
+
+                detected_invoice_rows += len(
+                    extracted["rows"]
+                )
+
+                matched_df = match_invoice_rows(
+                    invoice_rows=extracted[
+                        "rows"
+                    ],
+                    selected_vendor_no=(
+                        selected_vendor_no
+                    ),
+                    cross_refs=cross_refs
+                )
+
+                if not matched_df.empty:
+
+                    matched_df["_file"] = (
+                        pdf_file.name
+                    )
+
+                    all_results.append(
+                        matched_df
+                    )
+
+        if not all_results:
+
+            st.error(
+                "Не бяха открити фактурни "
+                "позиции в PDF."
+            )
+
+            st.stop()
+
+        final_result_df = pd.concat(
+            all_results,
+            ignore_index=True
+        )
+
+        final_result_df = (
+            final_result_df
+            .drop_duplicates(
+                subset=[
+                    "_file",
+                    "_invoice_item",
+                    "Qty",
+                    "Price 1 pc",
+                    "_page"
+                ]
+            )
+            .reset_index(drop=True)
+        )
+
+        direct_count = int(
+            (
+                final_result_df["_status"]
+                == "direct"
+            ).sum()
+        )
+
+        item_match_count = int(
+            (
+                final_result_df["_status"]
+                == "item_no"
+            ).sum()
+        )
+
+        not_found_count = int(
+            (
+                final_result_df["_status"]
+                == "not_found"
+            ).sum()
+        )
+
+        invalid_total_count = int(
+            (
+                final_result_df[
+                    "_calculation_ok"
+                ]
+                == False
+            ).sum()
+        )
+
+        col1, col2, col3, col4 = (
+            st.columns(4)
+        )
+
+        with col1:
+
+            st.metric(
+                "📄 Страници",
+                processed_pages
+            )
+
+        with col2:
+
+            st.metric(
+                "✅ Директни",
+                direct_count
+            )
+
+        with col3:
+
+            st.metric(
+                "⚠️ Чрез Item No.",
+                item_match_count
+            )
+
+        with col4:
+
+            st.metric(
+                "❗ Ненамерени",
+                not_found_count
+            )
+
+        st.info(
+            f"Открити фактурни позиции: "
+            f"{detected_invoice_rows} | "
+            f"Редове в резултата: "
+            f"{len(final_result_df)} | "
+            f"Редове с непотвърден Total: "
+            f"{invalid_total_count}"
+        )
+
+        preview_df = final_result_df[
+            [
+                "Cross-Reference Type No.",
+                "Cross-Reference No.",
+                "Qty",
+                "Price 1 pc"
+            ]
+        ].copy()
+
+        st.subheader(
+            "📋 Разпознати фактурни позиции"
         )
 
         st.dataframe(
-            cross_refs.head(50),
-            use_container_width=True
+            preview_df,
+            use_container_width=True,
+            hide_index=True
         )
 
-        st.session_state[
-            "cross_refs"
-        ] = cross_refs
-        # ======================================================
-# PDF PARSER
-# ======================================================
-
-def normalize_text(text):
-
-    if text is None:
-        return ""
-
-    return re.sub(
-        r"[^A-Z0-9]",
-        "",
-        str(text).upper()
-    )
-
-
-results = []
-
-for pdf_file in uploaded_pdfs:
-
-    reader = pdfplumber.open(pdf_file)
-
-    extracted_text = ""
-
-    for page in reader.pages:
-
-        page_text = page.extract_text()
-
-        if page_text:
-
-            extracted_text += page_text + "\n"
-
-    reader.close()
-
-    lines = extracted_text.split("\n")
-
-    for line in lines:
-
-        normalized_line = normalize_text(
-            line
+        st.caption(
+            "⚠️ = намерен чрез Item No. | "
+            "❗ = оригиналният номер от фактурата "
+            "не е намерен в Cross Reference базата"
         )
 
-        if len(normalized_line) < 4:
+        if len(invoice_numbers) == 1:
 
-            continue
-
-        # =====================================
-        # SEARCH CROSS REFERENCE
-        # =====================================
-
-        match_found = False
-
-        for _, ref_row in cross_refs.iterrows():
-
-            cross_ref = str(
-                ref_row["normalized_cross_reference"]
+            invoice_number = (
+                invoice_numbers[0]
             )
 
-            item_no = str(
-                ref_row["normalized_item_no"]
+            excel_file_name = (
+                f"{invoice_number}.xlsx"
             )
 
-            # direct cross reference
+        else:
 
-            if (
-                cross_ref != ""
-                and
-                cross_ref in normalized_line
-            ):
-
-                results.append({
-                    "Cross-Reference Type No.":
-                        ref_row["vendor_no"],
-
-                    "Cross-Reference No.":
-                        ref_row["cross_reference_no"],
-
-                    "Qty": "",
-
-                    "Price 1 pc": ""
-                })
-
-                match_found = True
-
-                break
-
-            # item no fallback
-
-            if (
-                item_no != ""
-                and
-                item_no in normalized_line
-            ):
-
-                results.append({
-                    "Cross-Reference Type No.":
-                        ref_row["vendor_no"],
-
-                    "Cross-Reference No.":
-                        "⚠️ "
-                        +
-                        str(
-                            ref_row[
-                                "cross_reference_no"
-                            ]
-                        ),
-
-                    "Qty": "",
-
-                    "Price 1 pc": ""
-                })
-
-                match_found = True
-
-                break
-
-        # =====================================
-        # NOT FOUND
-        # =====================================
-
-        if (
-            not match_found
-            and
-            len(normalized_line) > 6
-        ):
-
-            tokens = re.findall(
-                r"[A-Z0-9\-\/]+",
-                line.upper()
+            excel_file_name = (
+                "multiple_invoices.xlsx"
             )
 
-            if tokens:
-
-                token = tokens[0]
-
-                results.append({
-                    "Cross-Reference Type No.":
-                        selected_vendor_no,
-
-                    "Cross-Reference No.":
-                        "❗ " + token,
-
-                    "Qty": "",
-
-                    "Price 1 pc": ""
-                })
-
-
-# ======================================================
-# RESULT TABLE
-# ======================================================
-
-if results:
-
-    result_df = pd.DataFrame(
-        results
-    )
-
-    result_df = result_df.drop_duplicates()
-
-    st.subheader(
-        "📋 Разпознати артикули"
-    )
-
-    st.dataframe(
-        result_df,
-        use_container_width=True
-    )
-
-    # =====================================
-    # EXCEL EXPORT
-    # =====================================
-
-    output = io.BytesIO()
-
-    with pd.ExcelWriter(
-        output,
-        engine="openpyxl"
-    ) as writer:
-
-        result_df.to_excel(
-            writer,
-            index=False
+        excel_output = create_invoice_excel(
+            final_result_df
         )
 
-    output.seek(0)
-
-    st.download_button(
-        label="📥 Изтегли Excel",
-        data=output,
-        file_name="cross_reference_result.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
-
-else:
-
-    st.warning(
-        "Няма намерени артикули."
-    )
+        st.download_button(
+            label="📥 Изтегли Excel за PRN",
+            data=excel_output,
+            file_name=excel_file_name,
+            mime=(
+                "application/vnd.openxmlformats-"
+                "officedocument.spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+            key="download_invoice_excel"
+        )
