@@ -730,6 +730,7 @@ def extract_federal_rows(pdf_file):
 def extract_castrol_rows(pdf_file):
 
     rows = []
+
     full_text = ""
 
     pdf_file.seek(0)
@@ -753,153 +754,98 @@ def extract_castrol_rows(pdf_file):
                 for line in page_text.splitlines()
                 if line.strip()
             ]
-            if page_number == 1:
 
-                st.write("========== CASTROL TEXT ==========")
-            
-                for line in lines[:120]:
-            
-                    st.write(line)
-
-            for index in range(len(lines)):
+            for index in range(
+                len(lines) - 1
+            ):
 
                 current_line = lines[index]
 
-                # Пример:
-                # 15F710
-                # 15FFAE
-                # 15BF39
+                next_line = lines[
+                    index + 1
+                ]
 
-                if not re.match(
-                    r'^[A-Z0-9]{5,10}$',
-                    current_line
+                # ====================================
+                # Търсим ред съдържащ ST + Qty + Price
+                # ====================================
+
+                if " ST " not in (
+                    " " + current_line + " "
                 ):
                     continue
 
-                invoice_item = current_line
-                st.write(
-                    f"CASTROL CODE FOUND: {invoice_item}"
+                numbers = re.findall(
+                    r'\d+(?:,\d+|\.\d+)?',
+                    current_line
                 )
 
-                qty = None
-                price = None
+                if len(numbers) < 3:
+                    continue
 
-                search_start = max(
-                    0,
-                    index - 8
-                )
-                
-                for j in range(
-                    search_start,
-                    index
+                # ====================================
+                # Следващият ред трябва да е код
+                # ====================================
+
+                if not re.match(
+                    r'^[A-Z0-9]{5,10}$',
+                    next_line
                 ):
+                    continue
 
-                    numeric_line = lines[j]
+                invoice_item = next_line
 
-                    if "ST" not in numeric_line:
-                        continue
-                        numbers = re.findall(
-                            r'\d+(?:,\d+|\.\d+)?',
-                            numeric_line
-                        )
-                        
-                        if len(numbers) < 3:
-                            continue
-                        
-                        try:
-                        
-                            qty = float(
-                                numbers[-3].replace(",", "")
-                            )
-                        
-                            price = float(
-                                numbers[-2].replace(",", "")
-                            )
-                        
-                            break
-                        
-                        except Exception:
-                            pass
-                    
-                        print(
-                            "CASTROL CHECK:",
-                            invoice_item,
-                            "->",
-                            numeric_line
-                        )
+                try:
 
-                    numbers = re.findall(
-                        r'\d+(?:\.\d+)?',
-                        numeric_line
+                    qty = float(
+                        numbers[-3]
+                        .replace(",", "")
                     )
 
-                    if len(numbers) >= 2:
+                    price = float(
+                        numbers[-2]
+                        .replace(",", "")
+                    )
 
-                        try:
+                except Exception:
 
-                            qty = float(
-                                numbers[0]
-                            )
+                    continue
 
-                            price = float(
-                                numbers[1]
-                            )
-                            print(
-                                "FOUND:",
-                                invoice_item,
-                                qty,
-                                price
-                            )
+                rows.append({
 
-                            break
+                    "invoice_item":
+                        invoice_item,
 
-                        except Exception:
+                    "normalized_invoice_item":
+                        normalize_item_number(
+                            invoice_item
+                        ),
 
-                            pass
-                            st.write(
-                                "CHECK:",
-                                invoice_item,
-                                qty,
-                                price
-                            )
+                    "qty":
+                        qty,
 
-                if (
-                    qty is not None
-                    and
-                    price is not None
-                ):
+                    "price":
+                        price,
 
-                    rows.append({
-                        "invoice_item":
-                            invoice_item,
+                    "page":
+                        page_number,
 
-                        "normalized_invoice_item":
-                            normalize_item_number(
-                                invoice_item
-                            ),
+                    "source_line":
+                        current_line,
 
-                        "qty":
-                            qty,
+                    "calculation_ok":
+                        True
 
-                        "price":
-                            price,
+                })
 
-                        "page":
-                            page_number,
-
-                        "source_line":
-                            current_line,
-
-                        "calculation_ok":
-                            True
-                    })
-
-    invoice_number = extract_invoice_number(
-        full_text,
-        pdf_file.name
+    invoice_number = (
+        extract_invoice_number(
+            full_text,
+            pdf_file.name
+        )
     )
 
     return {
+
         "invoice_number":
             invoice_number,
 
@@ -908,6 +854,7 @@ def extract_castrol_rows(pdf_file):
 
         "rows":
             rows
+
     }
 # ======================================================
 # BUILD FAST CROSS-REFERENCE INDEXES
