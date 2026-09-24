@@ -319,3 +319,63 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+# ======================================================
+# PDF → EXCEL
+# ======================================================
+
+if page == "📄 PDF → Excel":
+
+    st.markdown(
+        """
+        <div class="main-card">
+            <h2>📄 PDF → Excel</h2>
+            <p>
+            Качи PDF фактура.
+            Приложението ще търси артикули
+            в Cross References от Neon.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    uploaded_pdfs = st.file_uploader(
+        "Качи PDF фактура",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="pdf_upload"
+    )
+
+    if uploaded_pdfs:
+
+        st.info(
+            "Зареждане на Cross References..."
+        )
+
+        conn = get_connection()
+
+        query = """
+        SELECT
+            vendor_no,
+            cross_reference_no,
+            item_no,
+            normalized_cross_reference,
+            normalized_item_no
+        FROM cross_references
+        WHERE vendor_no = %s
+        """
+
+        cross_refs = pd.read_sql_query(
+            query,
+            conn,
+            params=[selected_vendor_no]
+        )
+
+        st.success(
+            f"Cross References: {len(cross_refs)}"
+        )
+
+        st.dataframe(
+            cross_refs.head(20),
+            use_container_width=True
+        )
