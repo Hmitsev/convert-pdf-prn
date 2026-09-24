@@ -776,6 +776,11 @@ def extract_castrol_rows(pdf_file):
                     r'\d+(?:,\d+|\.\d+)?',
                     previous_line
                 )
+                st.write(
+                    "NUMBERS:",
+                    invoice_item,
+                    numbers
+                )
             
                 if len(numbers) < 3:
                     continue
@@ -810,7 +815,7 @@ def extract_castrol_rows(pdf_file):
                         price,
             
                     "line_total":
-                        None,
+                        line_total,
             
                     "calculation_ok":
                         True,
@@ -854,12 +859,16 @@ def extract_castrol_rows(pdf_file):
 
                 try:
 
-                    qty = float(
-                        numbers[0].replace(",", "")
+                   qty = parse_european_number(
+                        numbers[0]
                     )
                     
-                    price = float(
-                        numbers[1].replace(",", "")
+                    price = parse_european_number(
+                        numbers[1]
+                    )
+                    
+                    line_total = parse_european_number(
+                        numbers[2]
                     )
                     st.write(
                         f"FOUND: {invoice_item} | Qty={qty} | Price={price}"
