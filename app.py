@@ -1411,7 +1411,7 @@ if page == "🧾 Excel → PRN":
             ]
 
             required_cols = [
-                "Item No.",
+                "Item",
                 "Qty",
                 "Price 1 pc"
             ]
@@ -1433,7 +1433,7 @@ if page == "🧾 Excel → PRN":
 
             preview_df = df[
                 [
-                    "Item No.",
+                    "Item",
                     "Qty",
                     "Price 1 pc"
                 ]
@@ -1454,7 +1454,7 @@ if page == "🧾 Excel → PRN":
             for _, row in df.iterrows():
 
                 item = str(
-                    row["Item No."]
+                    row["Item"]
                 ).strip()
 
                 if (
