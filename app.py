@@ -824,7 +824,7 @@ def match_invoice_rows(
             )
 
             internal_item_no = (
-                reference["item_no"]
+                reference["internal_item_no"]
             )
 
             match_status = "direct"
@@ -847,7 +847,7 @@ def match_invoice_rows(
             )
 
             internal_item_no = (
-                reference["item_no"]
+                reference["internal_item_no"]
             )
 
             match_status = "item_no"
