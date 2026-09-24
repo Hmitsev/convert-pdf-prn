@@ -180,7 +180,6 @@ def get_connection():
 
     return psycopg2.connect(
         DATABASE_URL,
-        cursor_factory=RealDictCursor,
         keepalives=1,
         keepalives_idle=30,
         keepalives_interval=10,
@@ -195,7 +194,9 @@ def get_connection():
 @st.cache_data(ttl=3600)
 def load_vendors():
 
-    conn = get_connection()
+    conn = psycopg2.connect(
+        DATABASE_URL
+    )
 
     query = """
     SELECT
@@ -207,10 +208,12 @@ def load_vendors():
     ORDER BY vendor_name
     """
 
-    df = pd.read_sql(
+    df = pd.read_sql_query(
         query,
         conn
     )
+
+    conn.close()
 
     df["vendor_no"] = (
         df["vendor_no"]
@@ -224,20 +227,19 @@ def load_vendors():
         .str.strip()
     )
 
-    # маха евентуален header ред
     df = df[
         df["vendor_no"]
         .str.upper()
         != "VENDOR_NO"
     ]
 
-    return df.reset_index(drop=True)
+    return df.reset_index(drop=True)    
 # ======================================================
 # LOAD VENDORS DATA
 # ======================================================
 
 vendors_df = load_vendors()
-
+st.write(vendors_df.head())
 # DEBUG
 st.write(vendors_df.head())
 # ======================================================
