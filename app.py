@@ -283,11 +283,39 @@ if st.sidebar.button(
 # ======================================================
 
 vendors_df["display"] = (
-    vendors_df["vendor_no"]
+    vendors_df["vendor_no"].astype(str)
     +
     " | "
     +
-    vendors_df["vendor_name"]
+    vendors_df["vendor_name"].astype(str)
+)
+
+selected_vendor = st.selectbox(
+    "🚚 Избери доставчик",
+    vendors_df["display"].tolist()
+)
+
+selected_vendor_no = (
+    selected_vendor
+    .split(" | ")[0]
+    .strip()
+)
+
+st.markdown(
+    f"""
+    <div style="
+        background: rgba(0,0,0,0.35);
+        border:1px solid rgba(255,255,255,0.15);
+        border-radius:12px;
+        padding:12px;
+        color:#00ff88;
+        font-size:18px;
+        font-weight:700;
+    ">
+        ✅ Избран Vendor: {selected_vendor_no}
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
 selected_vendor = st.selectbox(
