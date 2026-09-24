@@ -859,20 +859,20 @@ def extract_castrol_rows(pdf_file):
 
                 try:
 
-                   qty = parse_european_number(
-                        numbers[0]
-                    )
-                    
-                    price = parse_european_number(
-                        numbers[1]
-                    )
-                    
-                    line_total = parse_european_number(
-                        numbers[2]
-                    )
-                    st.write(
-                        f"FOUND: {invoice_item} | Qty={qty} | Price={price}"
-                    )
+               qty = parse_european_number(
+                    numbers[0]
+                )
+                
+                price = parse_european_number(
+                    numbers[1]
+                )
+                
+                line_total = parse_european_number(
+                    numbers[2]
+                )
+                st.write(
+                    f"FOUND: {invoice_item} | Qty={qty} | Price={price}"
+                )
 
                 except Exception:
 
