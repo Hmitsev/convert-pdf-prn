@@ -755,15 +755,73 @@ def extract_castrol_rows(pdf_file):
                 if line.strip()
             ]
 
-            for index in range(
-                len(lines) - 1
-            ):
+            for index in range(1, len(lines)):
 
                 current_line = lines[index]
-
-                next_line = lines[
-                    index + 1
-                ]
+            
+                if not re.match(
+                    r'^[A-Z0-9]{5,10}$',
+                    current_line
+                ):
+                    continue
+            
+                invoice_item = current_line
+            
+                previous_line = lines[index - 1]
+            
+                if "ST" not in previous_line:
+                    continue
+            
+                numbers = re.findall(
+                    r'\d+(?:,\d+|\.\d+)?',
+                    previous_line
+                )
+            
+                if len(numbers) < 3:
+                    continue
+            
+                try:
+            
+                    qty = float(
+                        numbers[-3].replace(",", "")
+                    )
+            
+                    price = float(
+                        numbers[-2].replace(",", "")
+                    )
+            
+                except Exception:
+                    continue
+            
+                rows.append({
+            
+                    "invoice_item":
+                        invoice_item,
+            
+                    "normalized_invoice_item":
+                        normalize_item_number(
+                            invoice_item
+                        ),
+            
+                    "qty":
+                        qty,
+            
+                    "price":
+                        price,
+            
+                    "line_total":
+                        None,
+            
+                    "calculation_ok":
+                        True,
+            
+                    "page":
+                        page_number,
+            
+                    "source_line":
+                        previous_line
+            
+                })
 
                 # ====================================
                 # Търсим ред съдържащ ST + Qty + Price
