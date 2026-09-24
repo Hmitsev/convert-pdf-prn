@@ -1312,18 +1312,16 @@ if page == "📄 PDF → Excel":
             f"Редове с непотвърден Total: "
             f"{invalid_total_count}"
         )
-
-               preview_df = final_result_df[
-                    [
-                        "Cross-Reference Type No.",
-                        "Internal Item No.",
-                        "Item No.",
-                        "Cross-Reference No.",
-                        "Qty",
-                        "Price 1 pc"
-                    ]
-                ]
-    ].copy()
+        preview_df = final_result_df[
+            [
+                "Cross-Reference Type No.",
+                "Internal Item No.",
+                "Item No.",
+                "Cross-Reference No.",
+                "Qty",
+                "Price 1 pc"
+            ]
+        ].copy()
 
         st.subheader(
             "📋 Разпознати фактурни позиции"
