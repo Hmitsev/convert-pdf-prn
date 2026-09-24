@@ -246,7 +246,6 @@ vendors_df = load_vendors()
 
 vendors_df = load_vendors()
 
-st.write(vendors_df.head())
 
 
 # ======================================================
