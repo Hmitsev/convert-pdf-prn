@@ -401,3 +401,203 @@ if page == "📄 PDF → Excel":
         st.session_state[
             "cross_refs"
         ] = cross_refs
+        # ======================================================
+# PDF PARSER
+# ======================================================
+
+def normalize_text(text):
+
+    if text is None:
+        return ""
+
+    return re.sub(
+        r"[^A-Z0-9]",
+        "",
+        str(text).upper()
+    )
+
+
+results = []
+
+for pdf_file in uploaded_pdfs:
+
+    reader = pdfplumber.open(pdf_file)
+
+    extracted_text = ""
+
+    for page in reader.pages:
+
+        page_text = page.extract_text()
+
+        if page_text:
+
+            extracted_text += page_text + "\n"
+
+    reader.close()
+
+    lines = extracted_text.split("\n")
+
+    for line in lines:
+
+        normalized_line = normalize_text(
+            line
+        )
+
+        if len(normalized_line) < 4:
+
+            continue
+
+        # =====================================
+        # SEARCH CROSS REFERENCE
+        # =====================================
+
+        match_found = False
+
+        for _, ref_row in cross_refs.iterrows():
+
+            cross_ref = str(
+                ref_row["normalized_cross_reference"]
+            )
+
+            item_no = str(
+                ref_row["normalized_item_no"]
+            )
+
+            # direct cross reference
+
+            if (
+                cross_ref != ""
+                and
+                cross_ref in normalized_line
+            ):
+
+                results.append({
+                    "Cross-Reference Type No.":
+                        ref_row["vendor_no"],
+
+                    "Cross-Reference No.":
+                        ref_row["cross_reference_no"],
+
+                    "Qty": "",
+
+                    "Price 1 pc": ""
+                })
+
+                match_found = True
+
+                break
+
+            # item no fallback
+
+            if (
+                item_no != ""
+                and
+                item_no in normalized_line
+            ):
+
+                results.append({
+                    "Cross-Reference Type No.":
+                        ref_row["vendor_no"],
+
+                    "Cross-Reference No.":
+                        "⚠️ "
+                        +
+                        str(
+                            ref_row[
+                                "cross_reference_no"
+                            ]
+                        ),
+
+                    "Qty": "",
+
+                    "Price 1 pc": ""
+                })
+
+                match_found = True
+
+                break
+
+        # =====================================
+        # NOT FOUND
+        # =====================================
+
+        if (
+            not match_found
+            and
+            len(normalized_line) > 6
+        ):
+
+            tokens = re.findall(
+                r"[A-Z0-9\-\/]+",
+                line.upper()
+            )
+
+            if tokens:
+
+                token = tokens[0]
+
+                results.append({
+                    "Cross-Reference Type No.":
+                        selected_vendor_no,
+
+                    "Cross-Reference No.":
+                        "❗ " + token,
+
+                    "Qty": "",
+
+                    "Price 1 pc": ""
+                })
+
+
+# ======================================================
+# RESULT TABLE
+# ======================================================
+
+if results:
+
+    result_df = pd.DataFrame(
+        results
+    )
+
+    result_df = result_df.drop_duplicates()
+
+    st.subheader(
+        "📋 Разпознати артикули"
+    )
+
+    st.dataframe(
+        result_df,
+        use_container_width=True
+    )
+
+    # =====================================
+    # EXCEL EXPORT
+    # =====================================
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        result_df.to_excel(
+            writer,
+            index=False
+        )
+
+    output.seek(0)
+
+    st.download_button(
+        label="📥 Изтегли Excel",
+        data=output,
+        file_name="cross_reference_result.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+
+else:
+
+    st.warning(
+        "Няма намерени артикули."
+    )
