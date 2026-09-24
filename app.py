@@ -730,11 +730,14 @@ def build_cross_reference_indexes(
                 ] = {
                     "vendor_no":
                         vendor_no,
-
+                
                     "cross_reference_no":
                         cross_reference_no,
-
+                
                     "item_no":
+                        item_no,
+                
+                    "internal_item_no":
                         item_no
                 }
 
@@ -745,16 +748,19 @@ def build_cross_reference_indexes(
                 not in item_index
             ):
 
-                item_index[
+               item_index[
                     normalized_item_no
                 ] = {
                     "vendor_no":
                         vendor_no,
-
+                
                     "cross_reference_no":
                         cross_reference_no,
-
+                
                     "item_no":
+                        item_no,
+                
+                    "internal_item_no":
                         item_no
                 }
 
@@ -849,6 +855,9 @@ def match_invoice_rows(
         matched_rows.append({
             "Cross-Reference Type No.":
                 selected_vendor_no,
+            
+            "Internal Item No.":
+                internal_item_no,
         
             "Item No.":
                 invoice_item,
@@ -1304,14 +1313,16 @@ if page == "📄 PDF → Excel":
             f"{invalid_total_count}"
         )
 
-        preview_df = final_result_df[
+       preview_df = final_result_df[
     [
         "Cross-Reference Type No.",
+        "Internal Item No.",
         "Item No.",
         "Cross-Reference No.",
         "Qty",
         "Price 1 pc"
     ]
+]
 ].copy()
 
         st.subheader(
