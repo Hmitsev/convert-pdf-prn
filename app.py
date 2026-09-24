@@ -753,6 +753,13 @@ def extract_castrol_rows(pdf_file):
                 for line in page_text.splitlines()
                 if line.strip()
             ]
+            if page_number == 1:
+
+                st.write("========== CASTROL TEXT ==========")
+            
+                for line in lines[:120]:
+            
+                    st.write(line)
 
             for index in range(len(lines)):
 
