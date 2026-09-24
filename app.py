@@ -857,38 +857,93 @@ def extract_castrol_rows(pdf_file):
             rows
 
     }
+    # ======================================================
+# CASTROL PARSER
+# ======================================================
 
-                # ====================================
-                # Следващият ред трябва да е код
-                # ====================================
+def extract_castrol_rows(pdf_file):
 
+    rows = []
+    full_text = ""
+
+    pdf_file.seek(0)
+
+    with pdfplumber.open(pdf_file) as pdf:
+
+        pages_count = len(pdf.pages)
+
+        for page_number, page in enumerate(
+            pdf.pages,
+            start=1
+        ):
+
+            page_text = page.extract_text()
+
+            if not page_text:
+                continue
+
+            full_text += page_text + "\n"
+
+            lines = [
+                line.strip()
+                for line in page_text.splitlines()
+                if line.strip()
+            ]
+
+            for index in range(1, len(lines)):
+
+                current_line = lines[index]
+
+                # Cross Ref код
                 if not re.match(
                     r'^[A-Z0-9]{5,10}$',
-                    next_line
+                    current_line
                 ):
                     continue
 
-                invoice_item = next_line
+                invoice_item = current_line
+
+                previous_line = lines[
+                    index - 1
+                ]
+
+                if "ST" not in previous_line:
+                    continue
+
+                st_part = (
+                    previous_line
+                    .split("ST")[-1]
+                )
+
+                numbers = re.findall(
+                    r'\d[\d\.,]*',
+                    st_part
+                )
+
+                if len(numbers) < 4:
+                    continue
 
                 try:
-    
-                   qty = parse_european_number(
+
+                    qty = parse_european_number(
                         numbers[0]
                     )
-                    
+
                     price = parse_european_number(
                         numbers[1]
                     )
-                    
+
                     line_total = parse_european_number(
                         numbers[2]
                     )
-                st.write(
-                    f"FOUND: {invoice_item} | Qty={qty} | Price={price}"
-                )
 
                 except Exception:
+                    continue
 
+                if qty is None:
+                    continue
+
+                if price is None:
                     continue
 
                 rows.append({
@@ -907,14 +962,17 @@ def extract_castrol_rows(pdf_file):
                     "price":
                         price,
 
+                    "line_total":
+                        line_total,
+
+                    "calculation_ok":
+                        True,
+
                     "page":
                         page_number,
 
                     "source_line":
-                        current_line,
-
-                    "calculation_ok":
-                        True
+                        previous_line
 
                 })
 
@@ -931,12 +989,14 @@ def extract_castrol_rows(pdf_file):
             invoice_number,
 
         "pages":
-            len(pdf.pages),
+            pages_count,
 
         "rows":
             rows
 
     }
+
+                
 # ======================================================
 # BUILD FAST CROSS-REFERENCE INDEXES
 # ======================================================
