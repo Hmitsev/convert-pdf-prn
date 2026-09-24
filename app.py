@@ -855,13 +855,14 @@ def extract_castrol_rows(pdf_file):
                 try:
 
                     qty = float(
-                        numbers[-3]
-                        .replace(",", "")
+                        numbers[0].replace(",", "")
                     )
-
+                    
                     price = float(
-                        numbers[-2]
-                        .replace(",", "")
+                        numbers[1].replace(",", "")
+                    )
+                    st.write(
+                        f"FOUND: {invoice_item} | Qty={qty} | Price={price}"
                     )
 
                 except Exception:
