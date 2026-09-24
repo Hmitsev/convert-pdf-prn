@@ -241,11 +241,6 @@ def load_vendors():
     ]
 
     return df.reset_index(drop=True)    
-# ======================================================
-# LOAD VENDORS DATA
-# ======================================================
-
-vendors_df = load_vendors()
 
 # ======================================================
 # LOAD DATA
@@ -910,7 +905,7 @@ def create_invoice_excel(result_df):
             "Qty",
             "Price 1 pc"
         ]
-    ]
+    
     ].copy()
 
     grand_total = (
@@ -967,15 +962,15 @@ def create_invoice_excel(result_df):
 
         worksheet.column_dimensions[
             "A"
-        ].width = 28
+        ].width = 22
 
         worksheet.column_dimensions[
             "B"
-        ].width = 30
+        ].width = 32
 
         worksheet.column_dimensions[
             "C"
-        ].width = 14
+        ].width = 28
 
         worksheet.column_dimensions[
             "D"
@@ -1108,7 +1103,7 @@ def create_invoice_excel(result_df):
         worksheet.cell(
             row=total_excel_row,
             column=4
-        ).number_format = "0.00"
+        ).number_format = "0.000000"
 
     output.seek(0)
 
