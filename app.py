@@ -1314,15 +1314,15 @@ if page == "📄 PDF → Excel":
         )
 
        preview_df = final_result_df[
-    [
-        "Cross-Reference Type No.",
-        "Internal Item No.",
-        "Item No.",
-        "Cross-Reference No.",
-        "Qty",
-        "Price 1 pc"
-    ]
-]
+            [
+                "Cross-Reference Type No.",
+                "Internal Item No.",
+                "Item No.",
+                "Cross-Reference No.",
+                "Qty",
+                "Price 1 pc"
+            ]
+        ]
 ].copy()
 
         st.subheader(
