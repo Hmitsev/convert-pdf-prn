@@ -329,15 +329,18 @@ else:
 
     selected_vendor_no = None
 # ======================================================
-# LOAD CROSS REFERENCES
+# LOAD CROSS REFERENCES FROM BOTH NEON PROJECTS
 # ======================================================
 
 @st.cache_data(ttl=3600)
 def load_cross_references(vendor_no):
 
-    conn = psycopg2.connect(
-        DATABASE_URL
-    )
+    databases = [
+        st.secrets["DATABASE_URL"],
+        st.secrets["DATABASE_URL_2"]
+    ]
+
+    all_frames = []
 
     query = """
     SELECT
@@ -350,15 +353,68 @@ def load_cross_references(vendor_no):
     WHERE vendor_no = %s
     """
 
-    df = pd.read_sql_query(
-        query,
-        conn,
-        params=[vendor_no]
+    for database_url in databases:
+
+        conn = None
+
+        try:
+
+            conn = psycopg2.connect(
+                database_url
+            )
+
+            df = pd.read_sql_query(
+                query,
+                conn,
+                params=[vendor_no]
+            )
+
+            if not df.empty:
+
+                all_frames.append(df)
+
+        except Exception as error:
+
+            st.warning(
+                f"Neon connection problem: {error}"
+            )
+
+        finally:
+
+            if conn is not None:
+
+                conn.close()
+
+    if not all_frames:
+
+        return pd.DataFrame(
+            columns=[
+                "vendor_no",
+                "cross_reference_no",
+                "item_no",
+                "normalized_cross_reference",
+                "normalized_item_no"
+            ]
+        )
+
+    result = pd.concat(
+        all_frames,
+        ignore_index=True
     )
 
-    conn.close()
+    result = (
+        result
+        .drop_duplicates(
+            subset=[
+                "vendor_no",
+                "cross_reference_no",
+                "item_no"
+            ]
+        )
+        .reset_index(drop=True)
+    )
 
-    return df
+    return result
 
 # ======================================================
 # ITEM NORMALIZATION
