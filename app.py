@@ -1061,12 +1061,12 @@ def create_invoice_excel(result_df):
 
             worksheet.cell(
                 row=excel_row,
-                column=3
+                column=4
             ).number_format = "0.###"
-
+            
             worksheet.cell(
                 row=excel_row,
-                column=4
+                column=5
             ).number_format = "0.000000"
 
             for column_number in range(
