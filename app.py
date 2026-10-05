@@ -198,7 +198,7 @@ def get_connection():
 # LOAD VENDORS
 # ======================================================
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=60)
 def load_vendors():
 
     conn = psycopg2.connect(
@@ -368,11 +368,6 @@ def load_cross_references(vendor_no):
                 conn,
                 params=[vendor_no]
             )
-            st.write("DATABASE:")
-            st.write(database_url)
-            
-            st.write("ROWS:")
-            st.write(len(df))
 
             if not df.empty:
 
