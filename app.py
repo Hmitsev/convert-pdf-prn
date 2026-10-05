@@ -915,53 +915,26 @@ def extract_motul_pack_quantity(description):
 # ======================================================
 
 def extract_motul_rows(pdf_file):
+    """
+    MOTUL parser.
+
+    Поддържа:
+    - позиции, разделени между две PDF страници;
+    - PCE количества;
+    - CAR количества с разфасовка от Description;
+    - MDEU EXP Add Disc отстъпки;
+    - няколко позиции с един и същ Item-No.;
+    - цена на брой след приспадане на отстъпката.
+    """
+
     rows = []
     full_text = ""
     processed_pages = 0
 
-    # Начало на Motul позиция:
-    # 150 114178 TEKMA ULTIMA 5W-30 LS 20L
-    #
-    # При някои PDF файлове Pos. може да липсва в
-    # извлечения текст и линията да започва директно с:
-    # 114178 TEKMA ULTIMA 5W-30 LS 20L
-    item_line_pattern = re.compile(
-        r"^\s*"
-        r"(?:(\d{1,4})\s+)?"       # Pos. - незадължително
-        r"(\d{5,8})"               # Item-No.
-        r"\s+"
-        r"(.+?)"                   # Description
-        r"\s*$",
-        re.IGNORECASE
-    )
-
-    # Количество и стойност:
-    # 7 CAR 372,69
-    # 32 PCE 3.484,16
-    # 1 PCE 145,54
-    quantity_amount_pattern = re.compile(
-        r"^\s*"
-        r"(\d+(?:[.,]\d+)?)"
-        r"\s+"
-        r"(CAR|PCE)"
-        r"\s+"
-        r"([\d.]+(?:,\d+)?)"
-        r"\s*$",
-        re.IGNORECASE
-    )
-
-    # Резервен вариант, когато на същия ред има текст
-    # или extracted text съдържа допълнителни колони.
-    quantity_amount_search_pattern = re.compile(
-        r"\b"
-        r"(\d+(?:[.,]\d+)?)"
-        r"\s+"
-        r"(CAR|PCE)"
-        r"\s+"
-        r"([\d.]+(?:,\d+)?)"
-        r"\b",
-        re.IGNORECASE
-    )
+    # Всички линии от всички страници се събират
+    # в един общ списък. Това е важно, когато позиция
+    # започва на една страница и завършва на следващата.
+    document_lines = []
 
     pdf_file.seek(0)
 
@@ -982,261 +955,407 @@ def extract_motul_rows(pdf_file):
 
             full_text += page_text + "\n"
 
-            lines = [
-                " ".join(str(line).split())
-                for line in page_text.splitlines()
-                if str(line).strip()
-            ]
-
-            item_starts = []
-
-            # ==========================================
-            # ОТКРИВАНЕ НА ВСЕКИ ITEM-NO. И DESCRIPTION
-            # ==========================================
-
-            for line_index, line in enumerate(lines):
-                item_match = item_line_pattern.match(line)
-
-                if not item_match:
-                    continue
-
-                position_no = item_match.group(1)
-                item_no = item_match.group(2).strip()
-                description = item_match.group(3).strip()
-
-                description_upper = description.upper()
-
-                # Изключваме служебни редове, които могат
-                # случайно да изглеждат като продуктови.
-                forbidden_starts = (
-                    "EAN",
-                    "HS ",
-                    "HS N",
-                    "SALES ORDER",
-                    "PURCH. ORDER",
-                    "PURCH ORDER",
-                    "BATCH",
-                    "COUNTRY",
-                    "GW.",
-                    "NW.",
-                    "NET VALUE",
-                    "MDEU",
-                    "TERMS",
-                    "TOTAL"
+            for original_line in page_text.splitlines():
+                clean_line = " ".join(
+                    str(original_line).split()
                 )
 
-                if description_upper.startswith(
-                    forbidden_starts
-                ):
+                if not clean_line:
                     continue
 
-                # Motul Item-No. от примерите е цифров.
-                # Description трябва да съдържа поне буква.
-                if not re.search(
-                    r"[A-ZА-Я]",
-                    description_upper
-                ):
-                    continue
-
-                item_starts.append({
-                    "line_index": line_index,
-                    "position_no": position_no,
-                    "item_no": item_no,
-                    "description": description
+                document_lines.append({
+                    "page": page_number,
+                    "text": clean_line
                 })
 
-            # ==========================================
-            # ОБРАБОТКА НА БЛОКА НА ВСЕКИ АРТИКУЛ
-            # ==========================================
+    # ==============================================
+    # MOTUL PRODUCT START
+    # ==============================================
+    #
+    # Примери:
+    # 10 114190 TEKMA MEGA-X 10W-40 LS 20L
+    # 100 114221 TEKMA MEGA-X 10W-40 20L
+    # 134 104010 TRANSLUBE 20L
+    #
+    # search(), а не match(), защото в някои PDF
+    # файлове преди Pos. може да има останал текст.
+    item_start_pattern = re.compile(
+        r"(?:^|\s)"
+        r"(\d{1,4})"             # Pos.
+        r"\s+"
+        r"(\d{6})"               # Motul Item-No.
+        r"\s+"
+        r"(.+?)"                 # Description
+        r"\s*$",
+        re.IGNORECASE
+    )
 
-            for item_index, item_data in enumerate(
-                item_starts
+    # Основен ред с количество и Amount:
+    #
+    # 40 PCE 3.005,53
+    # 7 CAR 372,69
+    # 160 PCE 9.930,62
+    quantity_amount_pattern = re.compile(
+        r"\b"
+        r"(\d+(?:[.,]\d+)?)"
+        r"\s+"
+        r"(PCE|CAR)"
+        r"\s+"
+        r"([\d.]+(?:,\d+)?)"
+        r"\b",
+        re.IGNORECASE
+    )
+
+    # Отстъпка:
+    #
+    # MDEU EXP Add Disc % 8,50- 37,65
+    # MDEU EXP Add Disc % 12,00- 156,49
+    discount_pattern = re.compile(
+        r"MDEU\s+EXP\s+ADD\s+DISC\s*%"
+        r".*?"
+        r"(\d+(?:[.,]\d+)?)\s*[-−]?"
+        r"\s+"
+        r"([\d.]+(?:,\d+)?)",
+        re.IGNORECASE
+    )
+
+    # По-свободен резервен шаблон.
+    discount_fallback_pattern = re.compile(
+        r"ADD\s+DISC"
+        r".*?"
+        r"([\d.]+(?:,\d+)?)"
+        r"\s*$",
+        re.IGNORECASE
+    )
+
+    item_starts = []
+
+    # ==============================================
+    # ОТКРИВАНЕ НА НАЧАЛОТО НА ВСЯКА ПОЗИЦИЯ
+    # ==============================================
+
+    for line_index, line_data in enumerate(
+        document_lines
+    ):
+        line = line_data["text"]
+
+        item_match = item_start_pattern.search(line)
+
+        if not item_match:
+            continue
+
+        position_no = item_match.group(1).strip()
+        item_no = item_match.group(2).strip()
+        description = item_match.group(3).strip()
+
+        description_upper = description.upper()
+
+        # Защита срещу служебни редове, ако случайно
+        # съвпаднат с числовия шаблон.
+        forbidden_texts = (
+            "INVOICE NO",
+            "CUSTOMER",
+            "SALES ORDER",
+            "PURCH. ORDER",
+            "PURCH ORDER",
+            "DELIVERY NOTE",
+            "BATCH-NO",
+            "COUNTRY OF ORIGIN",
+            "TOTAL GROSS",
+            "TOTAL NET",
+            "TOTAL PACKAGES",
+            "TERMS OF PAYMENT"
+        )
+
+        if any(
+            forbidden_text in description_upper
+            for forbidden_text in forbidden_texts
+        ):
+            continue
+
+        # Описанието трябва да съдържа поне една буква.
+        if not re.search(
+            r"[A-ZА-Я]",
+            description_upper
+        ):
+            continue
+
+        item_starts.append({
+            "line_index": line_index,
+            "page": line_data["page"],
+            "position_no": position_no,
+            "item_no": item_no,
+            "description": description
+        })
+
+    # ==============================================
+    # ОБРАБОТКА НА ВСЕКИ ПРОДУКТОВ БЛОК
+    # ==============================================
+
+    for item_index, item_data in enumerate(
+        item_starts
+    ):
+        block_start = item_data["line_index"]
+
+        if item_index + 1 < len(item_starts):
+            block_end = item_starts[
+                item_index + 1
+            ]["line_index"]
+        else:
+            block_end = len(document_lines)
+
+        block_lines = document_lines[
+            block_start:block_end
+        ]
+
+        position_no = item_data["position_no"]
+        invoice_item = item_data["item_no"]
+        description = item_data["description"]
+        start_page = item_data["page"]
+
+        invoice_quantity = None
+        invoice_unit = None
+        gross_amount = None
+        discount_amount = 0.0
+        quantity_source_line = ""
+
+        # ==========================================
+        # QUANTITY И GROSS AMOUNT
+        # ==========================================
+
+        for block_line_data in block_lines:
+            block_line = block_line_data["text"]
+
+            quantity_match = (
+                quantity_amount_pattern.search(
+                    block_line
+                )
+            )
+
+            if not quantity_match:
+                continue
+
+            parsed_quantity = parse_european_number(
+                quantity_match.group(1)
+            )
+
+            parsed_unit = (
+                quantity_match.group(2)
+                .upper()
+                .strip()
+            )
+
+            parsed_amount = parse_european_number(
+                quantity_match.group(3)
+            )
+
+            if parsed_quantity is None:
+                continue
+
+            if parsed_amount is None:
+                continue
+
+            if parsed_quantity <= 0:
+                continue
+
+            if parsed_amount < 0:
+                continue
+
+            invoice_quantity = parsed_quantity
+            invoice_unit = parsed_unit
+            gross_amount = parsed_amount
+            quantity_source_line = block_line
+
+            # Вземаме само първия валиден ред
+            # Quantity + PCE/CAR + Amount в блока.
+            break
+
+        if invoice_quantity is None:
+            continue
+
+        if gross_amount is None:
+            continue
+
+        # ==========================================
+        # DISCOUNT
+        # ==========================================
+
+        discount_source_line = ""
+
+        for block_line_data in block_lines:
+            block_line = block_line_data["text"]
+
+            if (
+                "ADD DISC" not in block_line.upper()
+                and
+                "MDEU EXP" not in block_line.upper()
             ):
-                block_start = item_data["line_index"]
+                continue
 
-                if item_index + 1 < len(item_starts):
-                    block_end = item_starts[
-                        item_index + 1
-                    ]["line_index"]
-                else:
-                    block_end = len(lines)
+            discount_match = discount_pattern.search(
+                block_line
+            )
 
-                item_block_lines = lines[
-                    block_start:block_end
-                ]
+            if discount_match:
+                parsed_discount = (
+                    parse_european_number(
+                        discount_match.group(2)
+                    )
+                )
 
-                item_no = item_data["item_no"]
-                description = item_data["description"]
-                position_no = item_data["position_no"]
-
-                invoice_quantity = None
-                invoice_unit = None
-                invoice_amount = None
-                source_line = ""
-
-                # Търсим първия основен ред:
-                # Quantity + CAR/PCE + Amount.
-                #
-                # Следващият ред с число обикновено е
-                # отстъпката и не трябва да се използва.
-                for block_line in item_block_lines:
-                    quantity_match = (
-                        quantity_amount_pattern.match(
+                if parsed_discount is not None:
+                    if parsed_discount >= 0:
+                        discount_amount += (
+                            parsed_discount
+                        )
+                        discount_source_line = (
                             block_line
                         )
-                    )
 
-                    if not quantity_match:
-                        quantity_match = (
-                            quantity_amount_search_pattern.search(
-                                block_line
-                            )
+                continue
+
+            fallback_match = (
+                discount_fallback_pattern.search(
+                    block_line
+                )
+            )
+
+            if fallback_match:
+                parsed_discount = (
+                    parse_european_number(
+                        fallback_match.group(1)
+                    )
+                )
+
+                if parsed_discount is not None:
+                    if parsed_discount >= 0:
+                        discount_amount += (
+                            parsed_discount
+                        )
+                        discount_source_line = (
+                            block_line
                         )
 
-                    if not quantity_match:
-                        continue
+        # Нетна стойност след отстъпката.
+        net_amount = (
+            gross_amount
+            - discount_amount
+        )
 
-                    parsed_quantity = (
-                        parse_european_number(
-                            quantity_match.group(1)
-                        )
-                    )
+        if net_amount < 0:
+            continue
 
-                    parsed_unit = (
-                        quantity_match.group(2)
-                        .upper()
-                        .strip()
-                    )
+        # ==========================================
+        # QUANTITY CONVERSION
+        # ==========================================
 
-                    parsed_amount = (
-                        parse_european_number(
-                            quantity_match.group(3)
-                        )
-                    )
+        pack_quantity = extract_motul_pack_quantity(
+            description
+        )
 
-                    if parsed_quantity is None:
-                        continue
+        if invoice_unit == "CAR":
+            final_quantity = (
+                invoice_quantity
+                * pack_quantity
+            )
+        else:
+            final_quantity = invoice_quantity
 
-                    if parsed_amount is None:
-                        continue
+        if final_quantity <= 0:
+            continue
 
-                    if parsed_quantity <= 0:
-                        continue
+        # ==========================================
+        # PRICE PER PIECE
+        # ==========================================
 
-                    if parsed_amount < 0:
-                        continue
+        unit_price = (
+            net_amount
+            / final_quantity
+        )
 
-                    invoice_quantity = parsed_quantity
-                    invoice_unit = parsed_unit
-                    invoice_amount = parsed_amount
-                    source_line = block_line
-                    break
+        # Пазим достатъчно точност.
+        # В Excel стойността се визуализира според
+        # зададения number_format.
+        unit_price = round(
+            unit_price,
+            10
+        )
 
-                if invoice_quantity is None:
-                    continue
+        calculated_net_amount = (
+            final_quantity
+            * unit_price
+        )
 
-                if invoice_amount is None:
-                    continue
+        tolerance = max(
+            0.02,
+            abs(net_amount) * 0.0001
+        )
 
-                # ======================================
-                # РАЗФАСОВКА
-                # ======================================
+        calculation_ok = (
+            abs(
+                calculated_net_amount
+                - net_amount
+            )
+            <= tolerance
+        )
 
-                pack_quantity = (
-                    extract_motul_pack_quantity(
-                        description
-                    )
-                )
+        rows.append({
+            "invoice_item":
+                invoice_item,
 
-                # CAR = кашони.
-                # PCE = единични бройки.
-                if invoice_unit == "CAR":
-                    final_quantity = (
-                        invoice_quantity
-                        * pack_quantity
-                    )
-                else:
-                    final_quantity = invoice_quantity
+            "normalized_invoice_item":
+                normalize_item_number(
+                    invoice_item
+                ),
 
-                if final_quantity <= 0:
-                    continue
+            "description":
+                description,
 
-                # ======================================
-                # ЕДИНИЧНА ЦЕНА
-                # ======================================
+            "position_no":
+                position_no,
 
-                unit_price = (
-                    invoice_amount
-                    / final_quantity
-                )
+            "invoice_qty":
+                invoice_quantity,
 
-                # Не закръгляме прекалено рано.
-                # Excel после визуализира 6 знака.
-                unit_price = round(
-                    unit_price,
-                    10
-                )
+            "invoice_unit":
+                invoice_unit,
 
-                calculated_amount = (
-                    final_quantity
-                    * unit_price
-                )
+            "pack_qty":
+                pack_quantity,
 
-                tolerance = max(
-                    0.02,
-                    abs(invoice_amount) * 0.0001
-                )
+            "qty":
+                final_quantity,
 
-                calculation_ok = (
-                    abs(
-                        calculated_amount
-                        - invoice_amount
-                    )
-                    <= tolerance
-                )
+            "gross_amount":
+                gross_amount,
 
-                rows.append({
-                    "invoice_item":
-                        item_no,
+            "discount_amount":
+                discount_amount,
 
-                    "normalized_invoice_item":
-                        normalize_item_number(
-                            item_no
-                        ),
+            "net_amount":
+                net_amount,
 
-                    "description":
-                        description,
+            "price":
+                unit_price,
 
-                    "invoice_qty":
-                        invoice_quantity,
+            # Match функцията очаква line_total.
+            # Тук подаваме нетната стойност след
+            # приспадане на отстъпката.
+            "line_total":
+                net_amount,
 
-                    "invoice_unit":
-                        invoice_unit,
+            "calculation_ok":
+                calculation_ok,
 
-                    "pack_qty":
-                        pack_quantity,
+            "page":
+                start_page,
 
-                    "qty":
-                        final_quantity,
+            "source_line":
+                quantity_source_line,
 
-                    "price":
-                        unit_price,
-
-                    "line_total":
-                        invoice_amount,
-
-                    "calculation_ok":
-                        calculation_ok,
-
-                    "page":
-                        page_number,
-
-                    "position_no":
-                        position_no,
-
-                    "source_line":
-                        source_line
-                })
+            "discount_source_line":
+                discount_source_line
+        })
 
     invoice_number = extract_invoice_number(
         full_text,
@@ -1248,7 +1367,6 @@ def extract_motul_rows(pdf_file):
         "pages": processed_pages,
         "rows": rows
     }
-
                 
 # ======================================================
 # BUILD FAST CROSS-REFERENCE INDEXES
