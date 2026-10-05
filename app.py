@@ -723,141 +723,8 @@ def extract_federal_rows(pdf_file):
             extracted_rows
     }
 
+
 # ======================================================
-# CASTROL PARSER
-# ======================================================
-
-def extract_castrol_rows(pdf_file):
-
-    rows = []
-    full_text = ""
-
-    pdf_file.seek(0)
-
-    with pdfplumber.open(pdf_file) as pdf:
-
-        pages_count = len(pdf.pages)
-
-        for page_number, page in enumerate(
-            pdf.pages,
-            start=1
-        ):
-
-            page_text = page.extract_text()
-
-            if not page_text:
-                continue
-
-            full_text += page_text + "\n"
-
-            lines = [
-                line.strip()
-                for line in page_text.splitlines()
-                if line.strip()
-            ]
-
-            for index in range(1, len(lines)):
-
-                current_line = lines[index]
-
-                # Cross Ref код
-                if not re.match(
-                    r'^[A-Z0-9]{5,10}$',
-                    current_line
-                ):
-                    continue
-
-                invoice_item = current_line
-
-                previous_line = lines[index - 1]
-
-                # В Castrol редът преди кода съдържа:
-                # ST Qty Price Total VAT
-
-                if "ST" not in previous_line:
-                    continue
-
-                st_part = previous_line.split("ST")[-1]
-
-                numbers = re.findall(
-                    r'\d[\d\.,]*',
-                    st_part
-                )
-
-                if len(numbers) < 4:
-                    continue
-
-                try:
-
-                    qty = parse_european_number(
-                        numbers[0]
-                    )
-
-                    price = parse_european_number(
-                        numbers[1]
-                    )
-
-                    line_total = parse_european_number(
-                        numbers[2]
-                    )
-
-                except Exception:
-                    continue
-
-                if qty is None:
-                    continue
-
-                if price is None:
-                    continue
-
-                rows.append({
-
-                    "invoice_item":
-                        invoice_item,
-
-                    "normalized_invoice_item":
-                        normalize_item_number(
-                            invoice_item
-                        ),
-
-                    "qty":
-                        qty,
-
-                    "price":
-                        price,
-
-                    "line_total":
-                        line_total,
-
-                    "calculation_ok":
-                        True,
-
-                    "page":
-                        page_number,
-
-                    "source_line":
-                        previous_line
-
-                })
-
-    invoice_number = extract_invoice_number(
-        full_text,
-        pdf_file.name
-    )
-
-    return {
-
-        "invoice_number":
-            invoice_number,
-
-        "pages":
-            pages_count,
-
-        "rows":
-            rows
-
-    }
-    # ======================================================
 # CASTROL PARSER
 # ======================================================
 
@@ -994,6 +861,392 @@ def extract_castrol_rows(pdf_file):
         "rows":
             rows
 
+    }
+# ======================================================
+# MOTUL PACK SIZE
+# ======================================================
+
+def extract_motul_pack_quantity(description):
+    """
+    Извлича броя артикули в един кашон от описанието.
+
+    Примери:
+    8100 ECO-LITE 0W20 4X5L       -> 4
+    8100 ECO-CLEAN 0W20 12X1L     -> 12
+    C5 CHAIN PASTE 12X0.150L       -> 12
+    HIGH-TORQUE DCTF 12X1L D38     -> 12
+    TEKMA ULTIMA 5W-30 LS 20L      -> 1
+    """
+
+    if description is None:
+        return 1
+
+    text = str(description).upper().strip()
+
+    # Позволява:
+    # 12X1L
+    # 12 X 1L
+    # 12X0.150L
+    # 12X0,150L
+    # 4X5L
+    # 24X400ML
+    pack_match = re.search(
+        r"\b(\d{1,4})\s*[XХ×]\s*"
+        r"\d+(?:[.,]\d+)?\s*"
+        r"(?:ML|CL|DL|L|LT|LTR|KG|G)?\b",
+        text,
+        re.IGNORECASE
+    )
+
+    if not pack_match:
+        return 1
+
+    try:
+        pack_quantity = int(pack_match.group(1))
+    except Exception:
+        return 1
+
+    if pack_quantity <= 0:
+        return 1
+
+    return pack_quantity
+# ======================================================
+# MOTUL PARSER
+# ======================================================
+
+def extract_motul_rows(pdf_file):
+    rows = []
+    full_text = ""
+    processed_pages = 0
+
+    # Начало на Motul позиция:
+    # 150 114178 TEKMA ULTIMA 5W-30 LS 20L
+    #
+    # При някои PDF файлове Pos. може да липсва в
+    # извлечения текст и линията да започва директно с:
+    # 114178 TEKMA ULTIMA 5W-30 LS 20L
+    item_line_pattern = re.compile(
+        r"^\s*"
+        r"(?:(\d{1,4})\s+)?"       # Pos. - незадължително
+        r"(\d{5,8})"               # Item-No.
+        r"\s+"
+        r"(.+?)"                   # Description
+        r"\s*$",
+        re.IGNORECASE
+    )
+
+    # Количество и стойност:
+    # 7 CAR 372,69
+    # 32 PCE 3.484,16
+    # 1 PCE 145,54
+    quantity_amount_pattern = re.compile(
+        r"^\s*"
+        r"(\d+(?:[.,]\d+)?)"
+        r"\s+"
+        r"(CAR|PCE)"
+        r"\s+"
+        r"([\d.]+(?:,\d+)?)"
+        r"\s*$",
+        re.IGNORECASE
+    )
+
+    # Резервен вариант, когато на същия ред има текст
+    # или extracted text съдържа допълнителни колони.
+    quantity_amount_search_pattern = re.compile(
+        r"\b"
+        r"(\d+(?:[.,]\d+)?)"
+        r"\s+"
+        r"(CAR|PCE)"
+        r"\s+"
+        r"([\d.]+(?:,\d+)?)"
+        r"\b",
+        re.IGNORECASE
+    )
+
+    pdf_file.seek(0)
+
+    with pdfplumber.open(pdf_file) as pdf:
+        processed_pages = len(pdf.pages)
+
+        for page_number, page in enumerate(
+            pdf.pages,
+            start=1
+        ):
+            page_text = page.extract_text(
+                x_tolerance=2,
+                y_tolerance=3
+            )
+
+            if not page_text:
+                continue
+
+            full_text += page_text + "\n"
+
+            lines = [
+                " ".join(str(line).split())
+                for line in page_text.splitlines()
+                if str(line).strip()
+            ]
+
+            item_starts = []
+
+            # ==========================================
+            # ОТКРИВАНЕ НА ВСЕКИ ITEM-NO. И DESCRIPTION
+            # ==========================================
+
+            for line_index, line in enumerate(lines):
+                item_match = item_line_pattern.match(line)
+
+                if not item_match:
+                    continue
+
+                position_no = item_match.group(1)
+                item_no = item_match.group(2).strip()
+                description = item_match.group(3).strip()
+
+                description_upper = description.upper()
+
+                # Изключваме служебни редове, които могат
+                # случайно да изглеждат като продуктови.
+                forbidden_starts = (
+                    "EAN",
+                    "HS ",
+                    "HS N",
+                    "SALES ORDER",
+                    "PURCH. ORDER",
+                    "PURCH ORDER",
+                    "BATCH",
+                    "COUNTRY",
+                    "GW.",
+                    "NW.",
+                    "NET VALUE",
+                    "MDEU",
+                    "TERMS",
+                    "TOTAL"
+                )
+
+                if description_upper.startswith(
+                    forbidden_starts
+                ):
+                    continue
+
+                # Motul Item-No. от примерите е цифров.
+                # Description трябва да съдържа поне буква.
+                if not re.search(
+                    r"[A-ZА-Я]",
+                    description_upper
+                ):
+                    continue
+
+                item_starts.append({
+                    "line_index": line_index,
+                    "position_no": position_no,
+                    "item_no": item_no,
+                    "description": description
+                })
+
+            # ==========================================
+            # ОБРАБОТКА НА БЛОКА НА ВСЕКИ АРТИКУЛ
+            # ==========================================
+
+            for item_index, item_data in enumerate(
+                item_starts
+            ):
+                block_start = item_data["line_index"]
+
+                if item_index + 1 < len(item_starts):
+                    block_end = item_starts[
+                        item_index + 1
+                    ]["line_index"]
+                else:
+                    block_end = len(lines)
+
+                item_block_lines = lines[
+                    block_start:block_end
+                ]
+
+                item_no = item_data["item_no"]
+                description = item_data["description"]
+                position_no = item_data["position_no"]
+
+                invoice_quantity = None
+                invoice_unit = None
+                invoice_amount = None
+                source_line = ""
+
+                # Търсим първия основен ред:
+                # Quantity + CAR/PCE + Amount.
+                #
+                # Следващият ред с число обикновено е
+                # отстъпката и не трябва да се използва.
+                for block_line in item_block_lines:
+                    quantity_match = (
+                        quantity_amount_pattern.match(
+                            block_line
+                        )
+                    )
+
+                    if not quantity_match:
+                        quantity_match = (
+                            quantity_amount_search_pattern.search(
+                                block_line
+                            )
+                        )
+
+                    if not quantity_match:
+                        continue
+
+                    parsed_quantity = (
+                        parse_european_number(
+                            quantity_match.group(1)
+                        )
+                    )
+
+                    parsed_unit = (
+                        quantity_match.group(2)
+                        .upper()
+                        .strip()
+                    )
+
+                    parsed_amount = (
+                        parse_european_number(
+                            quantity_match.group(3)
+                        )
+                    )
+
+                    if parsed_quantity is None:
+                        continue
+
+                    if parsed_amount is None:
+                        continue
+
+                    if parsed_quantity <= 0:
+                        continue
+
+                    if parsed_amount < 0:
+                        continue
+
+                    invoice_quantity = parsed_quantity
+                    invoice_unit = parsed_unit
+                    invoice_amount = parsed_amount
+                    source_line = block_line
+                    break
+
+                if invoice_quantity is None:
+                    continue
+
+                if invoice_amount is None:
+                    continue
+
+                # ======================================
+                # РАЗФАСОВКА
+                # ======================================
+
+                pack_quantity = (
+                    extract_motul_pack_quantity(
+                        description
+                    )
+                )
+
+                # CAR = кашони.
+                # PCE = единични бройки.
+                if invoice_unit == "CAR":
+                    final_quantity = (
+                        invoice_quantity
+                        * pack_quantity
+                    )
+                else:
+                    final_quantity = invoice_quantity
+
+                if final_quantity <= 0:
+                    continue
+
+                # ======================================
+                # ЕДИНИЧНА ЦЕНА
+                # ======================================
+
+                unit_price = (
+                    invoice_amount
+                    / final_quantity
+                )
+
+                # Не закръгляме прекалено рано.
+                # Excel после визуализира 6 знака.
+                unit_price = round(
+                    unit_price,
+                    10
+                )
+
+                calculated_amount = (
+                    final_quantity
+                    * unit_price
+                )
+
+                tolerance = max(
+                    0.02,
+                    abs(invoice_amount) * 0.0001
+                )
+
+                calculation_ok = (
+                    abs(
+                        calculated_amount
+                        - invoice_amount
+                    )
+                    <= tolerance
+                )
+
+                rows.append({
+                    "invoice_item":
+                        item_no,
+
+                    "normalized_invoice_item":
+                        normalize_item_number(
+                            item_no
+                        ),
+
+                    "description":
+                        description,
+
+                    "invoice_qty":
+                        invoice_quantity,
+
+                    "invoice_unit":
+                        invoice_unit,
+
+                    "pack_qty":
+                        pack_quantity,
+
+                    "qty":
+                        final_quantity,
+
+                    "price":
+                        unit_price,
+
+                    "line_total":
+                        invoice_amount,
+
+                    "calculation_ok":
+                        calculation_ok,
+
+                    "page":
+                        page_number,
+
+                    "position_no":
+                        position_no,
+
+                    "source_line":
+                        source_line
+                })
+
+    invoice_number = extract_invoice_number(
+        full_text,
+        pdf_file.name
+    )
+
+    return {
+        "invoice_number": invoice_number,
+        "pages": processed_pages,
+        "rows": rows
     }
 
                 
@@ -1506,13 +1759,21 @@ if page == "📄 PDF → Excel":
         ):
 
             for pdf_file in uploaded_pdfs:
-
+                # Castrol
                 if selected_vendor_no == "VEN0002914":
-
+                
                     extracted = extract_castrol_rows(
                         pdf_file
                     )
                 
+                # Motul
+                elif selected_vendor_no == "VEN0001554":
+                
+                    extracted = extract_motul_rows(
+                        pdf_file
+                    )
+                
+                # Federal и останалите доставчици
                 else:
                 
                     extracted = extract_federal_rows(
@@ -1670,6 +1931,39 @@ if page == "📄 PDF → Excel":
             use_container_width=True,
             hide_index=True
         )
+        if selected_vendor_no == "ТУК_ПОСТАВИ_VENDOR_NO_НА_MOTUL":
+
+            with st.expander(
+                "🔎 Motul изчисления"
+            ):
+                motul_debug_df = final_result_df[
+                    [
+                        "_invoice_item",
+                        "Qty",
+                        "Price 1 pc",
+                        "_line_total",
+                        "_calculation_ok",
+                        "_page"
+                    ]
+                ].copy()
+        
+                motul_debug_df["Calculated Total"] = (
+                    pd.to_numeric(
+                        motul_debug_df["Qty"],
+                        errors="coerce"
+                    )
+                    *
+                    pd.to_numeric(
+                        motul_debug_df["Price 1 pc"],
+                        errors="coerce"
+                    )
+                )
+        
+                st.dataframe(
+                    motul_debug_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
 
         st.caption(
             "⚠️ = намерен чрез Item No. | "
