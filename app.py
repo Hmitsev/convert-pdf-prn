@@ -368,6 +368,11 @@ def load_cross_references(vendor_no):
                 conn,
                 params=[vendor_no]
             )
+            st.write("DATABASE:")
+            st.write(database_url)
+            
+            st.write("ROWS:")
+            st.write(len(df))
 
             if not df.empty:
 
