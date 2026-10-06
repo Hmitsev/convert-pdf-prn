@@ -2266,96 +2266,89 @@ if page == "📄 PDF → Excel":
         
                     st.rerun()
     
-# ==============================================
-# 1. ДИРЕКТНО ЗАРЕДЕНИ ДАННИ ОТ PDF
-# ==============================================
+# ======================================================
+# EXCEL → PRN
+# ======================================================
 
-if not st.session_state.direct_prn_df.empty:
+if page == PAGE_PRN:
 
-    prn_source_df = (
-        st.session_state.direct_prn_df.copy()
+    st.markdown(
+        """
+        <div class="main-card">
+            <h2>🧾 Excel → PRN</h2>
+            <p>
+                Използвай директно заредените позиции
+                от PDF конвертора или качи готов Excel файл.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    source_description = (
-        "Данните са заредени директно от PDF → Excel."
-    )
+    # ==================================================
+    # SESSION STATE
+    # ==================================================
 
-
-# ==============================================
-# 2. РЪЧНО КАЧЕН EXCEL
-# ==============================================
-
-if uploaded_excel is not None:
-
-    try:
-
-        uploaded_df = pd.read_excel(
-            uploaded_excel,
-            engine="openpyxl"
+    if "direct_prn_df" not in st.session_state:
+        st.session_state.direct_prn_df = pd.DataFrame(
+            columns=[
+                "Item",
+                "Qty",
+                "Price 1 pc"
+            ]
         )
 
-        uploaded_df.columns = [
-            str(col).strip()
-            for col in uploaded_df.columns
-        ]
+    if "direct_prn_name" not in st.session_state:
+        st.session_state.direct_prn_name = "invoice"
 
-        if (
-            "Item" not in uploaded_df.columns
-            and
-            "Item No." in uploaded_df.columns
-        ):
-            uploaded_df = uploaded_df.rename(
-                columns={
-                    "Item No.": "Item"
-                }
-            )
+    if "prn_loaded" not in st.session_state:
+        st.session_state.prn_loaded = False
 
-        required_cols = [
+    # ==================================================
+    # EXCEL UPLOAD
+    # ==================================================
+
+    uploaded_excel = st.file_uploader(
+        "📊 Качи Excel файл",
+        type=["xlsx"],
+        key="prn_excel_upload"
+    )
+
+    # Тези променливи винаги се създават,
+    # преди да бъдат използвани.
+    prn_source_df = pd.DataFrame(
+        columns=[
             "Item",
             "Qty",
             "Price 1 pc"
         ]
+    )
 
-        missing = [
-            col
-            for col in required_cols
-            if col not in uploaded_df.columns
-        ]
+    prn_file_name = (
+        st.session_state.direct_prn_name
+    )
 
-        if missing:
+    source_description = ""
 
-            st.error(
-                "Липсват колони: "
-                + ", ".join(missing)
-            )
+    # ==================================================
+    # СЪОБЩЕНИЕ ЗА УСПЕШНО ПРЕХВЪРЛЯНЕ
+    # ==================================================
 
-        else:
+    if st.session_state.prn_loaded:
 
-            prn_source_df = uploaded_df[
-                required_cols
-            ].copy()
-
-            prn_file_name = (
-                uploaded_excel.name
-                .replace(".xlsx", "")
-                .replace(".xls", "")
-            )
-
-            source_description = (
-                f"Използва се каченият Excel: "
-                f"{uploaded_excel.name}"
-            )
-
-    except Exception as error:
-
-        st.error(
-            f"Грешка при четене на Excel: "
-            f"{error}"
+        loaded_rows = len(
+            st.session_state.direct_prn_df
         )
 
-    # ==============================================
+        st.success(
+            f"✅ Приемът е получен от PDF модула "
+            f"и е готов за PRN. "
+            f"Заредени редове: {loaded_rows}"
+        )
+
+    # ==================================================
     # 1. ДИРЕКТНО ЗАРЕДЕНИ ДАННИ ОТ PDF
-    # ==============================================
+    # ==================================================
 
     if not st.session_state.direct_prn_df.empty:
 
@@ -2363,14 +2356,18 @@ if uploaded_excel is not None:
             st.session_state.direct_prn_df.copy()
         )
 
+        prn_file_name = (
+            st.session_state.direct_prn_name
+        )
+
         source_description = (
-            "Данните са заредени директно "
+            "✅ Данните са заредени директно "
             "от PDF → Excel."
         )
 
-    # ==============================================
+    # ==================================================
     # 2. РЪЧНО КАЧЕН EXCEL
-    # ==============================================
+    # ==================================================
 
     if uploaded_excel is not None:
 
@@ -2386,8 +2383,7 @@ if uploaded_excel is not None:
                 for col in uploaded_df.columns
             ]
 
-            # Поддържа и старото Item,
-            # и реалното Item No. от PDF конвертора.
+            # Поддържа както Item, така и Item No.
             if (
                 "Item" not in uploaded_df.columns
                 and
@@ -2405,21 +2401,23 @@ if uploaded_excel is not None:
                 "Price 1 pc"
             ]
 
-            missing = [
+            missing_cols = [
                 col
                 for col in required_cols
                 if col not in uploaded_df.columns
             ]
 
-            if missing:
+            if missing_cols:
 
                 st.error(
-                    "Липсват колони: "
-                    + ", ".join(missing)
+                    "Липсват необходимите колони: "
+                    + ", ".join(missing_cols)
                 )
 
             else:
 
+                # Каченият Excel има приоритет
+                # пред директно заредените PDF данни.
                 prn_source_df = uploaded_df[
                     required_cols
                 ].copy()
@@ -2431,7 +2429,7 @@ if uploaded_excel is not None:
                 )
 
                 source_description = (
-                    f"Използва се каченият Excel: "
+                    f"✅ Използва се каченият Excel: "
                     f"{uploaded_excel.name}"
                 )
 
@@ -2439,61 +2437,171 @@ if uploaded_excel is not None:
 
             st.error(
                 f"Грешка при четене на Excel: "
-                f"{error}"
+                f"{type(error).__name__}: {error}"
             )
 
-    # ==============================================
+    # ==================================================
     # PRN PREVIEW И ГЕНЕРИРАНЕ
-    # ==============================================
+    # ==================================================
 
     if not prn_source_df.empty:
 
         prn_source_df = prn_source_df.copy()
 
+        # Почистване на Item.
         prn_source_df["Item"] = (
             prn_source_df["Item"]
             .astype(str)
-            .str.replace("⚠️", "", regex=False)
-            .str.replace("❗", "", regex=False)
+            .str.replace(
+                "⚠️",
+                "",
+                regex=False
+            )
+            .str.replace(
+                "❗",
+                "",
+                regex=False
+            )
             .str.strip()
         )
 
+        # Безопасно преобразуване на Qty.
         prn_source_df["Qty"] = pd.to_numeric(
-            prn_source_df["Qty"],
+            prn_source_df["Qty"]
+            .astype(str)
+            .str.replace(
+                ",",
+                ".",
+                regex=False
+            ),
             errors="coerce"
-        ).fillna(0)
+        )
 
+        # Безопасно преобразуване на Price.
         prn_source_df["Price 1 pc"] = pd.to_numeric(
-            prn_source_df["Price 1 pc"],
+            prn_source_df["Price 1 pc"]
+            .astype(str)
+            .str.replace(
+                ",",
+                ".",
+                regex=False
+            ),
             errors="coerce"
-        ).fillna(0)
+        )
 
+        # Премахва празни и TOTAL редове.
         prn_source_df = prn_source_df[
             (
-                prn_source_df["Item"]
-                .astype(str)
-                .str.strip()
-                != ""
+                prn_source_df["Item"] != ""
             )
             &
             (
                 prn_source_df["Item"]
-                .astype(str)
+                .str.lower()
+                != "nan"
+            )
+            &
+            (
+                prn_source_df["Item"]
                 .str.upper()
                 != "TOTAL"
             )
         ].copy()
 
-        st.success(source_description)
+        # Отделя невалидните редове.
+        invalid_rows = prn_source_df[
+            prn_source_df["Qty"].isna()
+            |
+            prn_source_df["Price 1 pc"].isna()
+        ].copy()
 
-        st.subheader("📋 PRN Preview")
+        # Оставя само валидните PRN редове.
+        valid_prn_df = prn_source_df[
+            prn_source_df["Qty"].notna()
+            &
+            prn_source_df["Price 1 pc"].notna()
+            &
+            (
+                prn_source_df["Qty"] > 0
+            )
+            &
+            (
+                prn_source_df["Price 1 pc"] >= 0
+            )
+        ].copy()
+
+        if source_description:
+
+            st.info(
+                source_description
+            )
+
+        st.subheader(
+            "📋 PRN Preview"
+        )
+
+        # Тук има само един data_editor
+        # и ключът е уникален.
+        edited_prn_df = st.data_editor(
+            valid_prn_df,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="prn_editor_final",
+            column_config={
+                "Item":
+                    st.column_config.TextColumn(
+                        "Item",
+                        required=True
+                    ),
+
+                "Qty":
+                    st.column_config.NumberColumn(
+                        "Qty",
+                        min_value=0,
+                        step=1,
+                        format="%.0f"
+                    ),
+
+                "Price 1 pc":
+                    st.column_config.NumberColumn(
+                        "Price 1 pc",
+                        min_value=0.0,
+                        format="%.6f"
+                    )
+            }
+        )
+
+        if not invalid_rows.empty:
+
+            st.warning(
+                f"Пропуснати невалидни редове: "
+                f"{len(invalid_rows)}"
+            )
+
+            with st.expander(
+                "Покажи невалидните редове"
+            ):
+
+                st.dataframe(
+                    invalid_rows,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+        # ==================================================
+        # СЪЗДАВАНЕ НА PRN СЪДЪРЖАНИЕТО
+        # ==================================================
 
         prn_lines = []
 
         for _, row in edited_prn_df.iterrows():
 
             item = str(
-                row.get("Item", "")
+                row.get(
+                    "Item",
+                    ""
+                )
             ).strip()
 
             if (
@@ -2505,29 +2613,31 @@ if uploaded_excel is not None:
 
             try:
 
-                qty_value = float(
-                    str(
-                        row.get("Qty", 0)
-                    ).replace(",", ".")
-                )
-
                 qty = int(
-                    round(qty_value)
+                    round(
+                        float(
+                            row.get(
+                                "Qty",
+                                0
+                            )
+                        )
+                    )
                 )
 
                 price = float(
-                    str(
-                        row.get(
-                            "Price 1 pc",
-                            0
-                        )
-                    ).replace(",", ".")
+                    row.get(
+                        "Price 1 pc",
+                        0
+                    )
                 )
 
             except Exception:
                 continue
 
-            if qty == 0:
+            if qty <= 0:
+                continue
+
+            if price < 0:
                 continue
 
             price_str = (
@@ -2542,38 +2652,73 @@ if uploaded_excel is not None:
                 - len(str(qty))
             )
 
-            line = (
+            prn_line = (
                 item
-                + (" " * spaces_before_qty)
+                + (
+                    " "
+                    * spaces_before_qty
+                )
                 + str(qty)
                 + (" " * 6)
                 + price_str
             )
 
-            prn_lines.append(line)
+            prn_lines.append(
+                prn_line
+            )
 
         prn_content = "\r\n".join(
             prn_lines
         )
 
-        st.download_button(
-            label="📥 Изтегли PRN",
-            data=prn_content.encode("utf-8"),
-            file_name=f"{prn_file_name}.prn",
-            mime="text/plain",
-            use_container_width=True,
-            key="download_generated_prn"
+        st.metric(
+            "Готови PRN редове",
+            len(prn_lines)
         )
 
-        st.success(
-            f"✅ Генерирани PRN редове: "
-            f"{len(prn_lines)}"
-        )
+        if prn_lines:
+
+            st.text_area(
+                "PRN съдържание",
+                value=prn_content,
+                height=250,
+                key="prn_text_preview_final"
+            )
+
+            st.download_button(
+                label="📥 Изтегли PRN",
+                data=prn_content.encode(
+                    "utf-8"
+                ),
+                file_name=(
+                    f"{prn_file_name}.prn"
+                ),
+                mime="text/plain",
+                use_container_width=True,
+                key="download_prn_final"
+            )
+
+            st.success(
+                f"✅ PRN файлът е готов. "
+                f"Генерирани редове: "
+                f"{len(prn_lines)}"
+            )
+
+        else:
+
+            st.warning(
+                "Няма валидни редове "
+                "за генериране на PRN."
+            )
+
+        # ==================================================
+        # ИЗЧИСТВАНЕ НА ПРИЕМА
+        # ==================================================
 
         if st.button(
             "🧹 Изчисти заредения прием",
             use_container_width=True,
-            key="clear_direct_prn"
+            key="clear_prn_final"
         ):
 
             st.session_state.direct_prn_df = (
@@ -2590,6 +2735,8 @@ if uploaded_excel is not None:
                 "invoice"
             )
 
+            st.session_state.prn_loaded = False
+
             st.rerun()
 
     else:
@@ -2600,172 +2747,3 @@ if uploaded_excel is not None:
             "'Зареди директно за PRN' "
             "или качи Excel файл."
         )
-
-    # ==============================================
-# PRN PREVIEW И ГЕНЕРИРАНЕ
-# ==============================================
-
-if not prn_source_df.empty:
-
-    prn_source_df = prn_source_df.copy()
-
-    prn_source_df["Item"] = (
-        prn_source_df["Item"]
-        .astype(str)
-        .str.replace("⚠️", "", regex=False)
-        .str.replace("❗", "", regex=False)
-        .str.strip()
-    )
-
-    prn_source_df["Qty"] = pd.to_numeric(
-        prn_source_df["Qty"],
-        errors="coerce"
-    ).fillna(0)
-
-    prn_source_df["Price 1 pc"] = pd.to_numeric(
-        prn_source_df["Price 1 pc"],
-        errors="coerce"
-    ).fillna(0)
-
-    prn_source_df = prn_source_df[
-        (
-            prn_source_df["Item"]
-            .astype(str)
-            .str.strip()
-            != ""
-        )
-        &
-        (
-            prn_source_df["Item"]
-            .astype(str)
-            .str.upper()
-            != "TOTAL"
-        )
-    ].copy()
-
-    st.success(source_description)
-
-    st.subheader("📋 PRN Preview")
-
-    edited_prn_df = st.data_editor(
-        prn_source_df,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="direct_prn_editor"
-    )
-
-    prn_lines = []
-
-    for _, row in edited_prn_df.iterrows():
-
-        item = str(
-            row.get("Item", "")
-        ).strip()
-
-        if (
-            item == ""
-            or item.lower() == "nan"
-            or item.upper() == "TOTAL"
-        ):
-            continue
-
-        try:
-
-            qty_value = float(
-                str(
-                    row.get("Qty", 0)
-                ).replace(",", ".")
-            )
-
-            qty = int(
-                round(qty_value)
-            )
-
-            price = float(
-                str(
-                    row.get(
-                        "Price 1 pc",
-                        0
-                    )
-                ).replace(",", ".")
-            )
-
-        except Exception:
-            continue
-
-        if qty == 0:
-            continue
-
-        price_str = (
-            f"{price:.6f}"
-            .replace(".", ",")
-        )
-
-        spaces_before_qty = max(
-            1,
-            25
-            - len(item)
-            - len(str(qty))
-        )
-
-        line = (
-            item
-            + (" " * spaces_before_qty)
-            + str(qty)
-            + (" " * 6)
-            + price_str
-        )
-
-        prn_lines.append(line)
-
-    prn_content = "\r\n".join(
-        prn_lines
-    )
-
-    st.download_button(
-        label="📥 Изтегли PRN",
-        data=prn_content.encode("utf-8"),
-        file_name=f"{prn_file_name}.prn",
-        mime="text/plain",
-        use_container_width=True,
-        key="download_generated_prn"
-    )
-
-    st.success(
-        f"✅ Генерирани PRN редове: "
-        f"{len(prn_lines)}"
-    )
-
-    if st.button(
-        "🧹 Изчисти заредения прием",
-        use_container_width=True,
-        key="clear_direct_prn"
-    ):
-
-        st.session_state.direct_prn_df = (
-            pd.DataFrame(
-                columns=[
-                    "Item",
-                    "Qty",
-                    "Price 1 pc"
-                ]
-            )
-        )
-
-        st.session_state.direct_prn_name = (
-            "invoice"
-        )
-
-        st.session_state["prn_loaded"] = False
-
-        st.rerun()
-
-else:
-
-    st.info(
-        "Няма зареден прием. "
-        "Отвори PDF → Excel и натисни "
-        "'Зареди директно за PRN' "
-        "или качи Excel файл."
-    )
