@@ -2257,9 +2257,11 @@ if page == "📄 PDF → Excel":
                         PAGE_PRN
                     )
         
+                    st.session_state["prn_loaded"] = True
+
                     st.success(
-                        f"Заредени за PRN: "
-                        f"{len(direct_prn_df)} реда."
+                        f"✅ Приемът е изпратен към PRN модула."
+                        f"\n\nРедове: {len(direct_prn_df)}"
                     )
         
                     st.rerun()
@@ -2381,6 +2383,11 @@ if page == PAGE_PRN:
     prn_source_df = pd.DataFrame()
     prn_file_name = st.session_state.direct_prn_name
     source_description = ""
+    if st.session_state.get("prn_loaded", False):
+
+    st.success(
+        "✅ Зареденият прием е получен от PDF модула и е готов за PRN."
+    )
 
     # ==============================================
     # 1. ДИРЕКТНО ЗАРЕДЕНИ ДАННИ ОТ PDF
