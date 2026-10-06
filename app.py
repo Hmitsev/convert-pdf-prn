@@ -2446,14 +2446,6 @@ if page == PAGE_PRN:
 
         st.subheader("📋 PRN Preview")
 
-        edited_prn_df = st.data_editor(
-            prn_source_df,
-            use_container_width=True,
-            hide_index=True,
-            num_rows="dynamic",
-            key="direct_prn_editor"
-        )
-
         prn_lines = []
 
         for _, row in edited_prn_df.iterrows():
