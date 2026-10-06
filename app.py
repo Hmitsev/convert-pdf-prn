@@ -2265,84 +2265,7 @@ if page == "📄 PDF → Excel":
                     )
         
                     st.rerun()
-        
-                prn_ready_df = final_result_df[
-                    [
-                        "Item No.",
-                        "Qty",
-                        "Price 1 pc"
-                    ]
-                ].copy()
-        
-                prn_ready_df = prn_ready_df.rename(
-                    columns={
-                        "Item No.": "Item"
-                    }
-                )
-        
-                # Премахва предупредителните символи,
-                # но не скрива ненамерените номера.
-                prn_ready_df["Item"] = (
-                    prn_ready_df["Item"]
-                    .astype(str)
-                    .str.replace(
-                        "⚠️",
-                        "",
-                        regex=False
-                    )
-                    .str.replace(
-                        "❗",
-                        "",
-                        regex=False
-                    )
-                    .str.strip()
-                )
-        
-                prn_ready_df["Qty"] = pd.to_numeric(
-                    prn_ready_df["Qty"],
-                    errors="coerce"
-                ).fillna(0)
-        
-                prn_ready_df["Price 1 pc"] = pd.to_numeric(
-                    prn_ready_df["Price 1 pc"],
-                    errors="coerce"
-                ).fillna(0)
-        
-                prn_ready_df = prn_ready_df[
-                    (
-                        prn_ready_df["Item"]
-                        .astype(str)
-                        .str.strip()
-                        != ""
-                    )
-                    &
-                    (
-                        prn_ready_df["Item"]
-                        .astype(str)
-                        .str.lower()
-                        != "nan"
-                    )
-                ].reset_index(drop=True)
-        
-                st.session_state.prn_ready_df = (
-                    prn_ready_df.copy()
-                )
-        
-                st.session_state.prn_invoice_name = (
-                    excel_file_name
-                    .replace(".xlsx", "")
-                    .replace(".xls", "")
-                )
-        
-                st.session_state.prn_source = (
-                    "PDF_CONVERSION"
-                )
-        
-                st.session_state.converter_page = (
-                    "🧾 Excel → PRN"
-                )
-        
-                st.rerun()
+    
 # ======================================================
 # EXCEL → PRN
 # ======================================================
@@ -2643,56 +2566,6 @@ if page == PAGE_PRN:
             "'Зареди директно за PRN' "
             "или качи Excel файл."
         )
-
-    
-
-    # ==============================================
-    # MANUALLY UPLOADED EXCEL
-    # ==============================================
-
-    elif uploaded_excel is not None:
-
-        try:
-
-            df = pd.read_excel(
-                uploaded_excel,
-                engine="openpyxl"
-            )
-
-            df.columns = [
-                str(col).strip()
-                for col in df.columns
-            ]
-
-            # Поддържа и двата варианта:
-            # Item
-            # Item No.
-            if (
-                "Item" not in df.columns
-                and
-                "Item No." in df.columns
-            ):
-
-                df = df.rename(
-                    columns={
-                        "Item No.": "Item"
-                    }
-                )
-
-            invoice_name = (
-                uploaded_excel.name
-                .replace(".xlsx", "")
-                .replace(".xls", "")
-            )
-
-        except Exception as error:
-
-            st.error(
-                f"Грешка при четене на Excel: "
-                f"{error}"
-            )
-
-            df = None
 
     # ==============================================
     # CREATE PRN
