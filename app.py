@@ -2264,15 +2264,6 @@ if page == "📄 PDF → Excel":
         
                     st.rerun()
         
-        with prn_col:
-        
-            if st.button(
-                "🧾 Зареди директно за PRN",
-                use_container_width=True,
-                type="primary",
-                key="load_directly_to_prn"
-            ):
-        
                 prn_ready_df = final_result_df[
                     [
                         "Item No.",
