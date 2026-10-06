@@ -2384,10 +2384,9 @@ if page == PAGE_PRN:
     prn_file_name = st.session_state.direct_prn_name
     source_description = ""
     if st.session_state.get("prn_loaded", False):
-
-    st.success(
-        "✅ Зареденият прием е получен от PDF модула и е готов за PRN."
-    )
+        st.success(
+            "✅ Зареденият прием е получен от PDF модула и е готов за PRN."
+        )
 
     # ==============================================
     # 1. ДИРЕКТНО ЗАРЕДЕНИ ДАННИ ОТ PDF
@@ -2645,21 +2644,7 @@ if page == PAGE_PRN:
             "или качи Excel файл."
         )
 
-    # ==============================================
-    # DIRECT RESULT FROM PDF
-    # ==============================================
-
-    if (
-        has_direct_prn
-        and
-        use_direct_result
-    ):
-
-        df = direct_prn_df.copy()
-
-        invoice_name = (
-            st.session_state.prn_invoice_name
-        )
+    
 
     # ==============================================
     # MANUALLY UPLOADED EXCEL
