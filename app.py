@@ -2266,49 +2266,91 @@ if page == "📄 PDF → Excel":
         
                     st.rerun()
     
-# ======================================================
-# EXCEL → PRN
-# ======================================================
+# ==============================================
+# 1. ДИРЕКТНО ЗАРЕДЕНИ ДАННИ ОТ PDF
+# ==============================================
 
-if page == PAGE_PRN:
+if not st.session_state.direct_prn_df.empty:
 
-    st.markdown(
-        """
-        <div class="main-card">
-            <h2>🧾 Excel → PRN</h2>
-            <p>
-                Използвай директно заредените позиции
-                от PDF конвертора или качи готов Excel файл.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
+    prn_source_df = (
+        st.session_state.direct_prn_df.copy()
     )
 
-    if "direct_prn_df" not in st.session_state:
-        st.session_state.direct_prn_df = pd.DataFrame(
-            columns=[
-                "Item",
-                "Qty",
-                "Price 1 pc"
-            ]
+    source_description = (
+        "Данните са заредени директно от PDF → Excel."
+    )
+
+
+# ==============================================
+# 2. РЪЧНО КАЧЕН EXCEL
+# ==============================================
+
+if uploaded_excel is not None:
+
+    try:
+
+        uploaded_df = pd.read_excel(
+            uploaded_excel,
+            engine="openpyxl"
         )
 
-    if "direct_prn_name" not in st.session_state:
-        st.session_state.direct_prn_name = "invoice"
+        uploaded_df.columns = [
+            str(col).strip()
+            for col in uploaded_df.columns
+        ]
 
-    uploaded_excel = st.file_uploader(
-        "📊 Качи Excel файл",
-        type=["xlsx"],
-        key="prn_excel_upload"
-    )
+        if (
+            "Item" not in uploaded_df.columns
+            and
+            "Item No." in uploaded_df.columns
+        ):
+            uploaded_df = uploaded_df.rename(
+                columns={
+                    "Item No.": "Item"
+                }
+            )
 
-    prn_source_df = pd.DataFrame()
-    prn_file_name = st.session_state.direct_prn_name
-    source_description = ""
-    if st.session_state.get("prn_loaded", False):
-        st.success(
-            "✅ Зареденият прием е получен от PDF модула и е готов за PRN."
+        required_cols = [
+            "Item",
+            "Qty",
+            "Price 1 pc"
+        ]
+
+        missing = [
+            col
+            for col in required_cols
+            if col not in uploaded_df.columns
+        ]
+
+        if missing:
+
+            st.error(
+                "Липсват колони: "
+                + ", ".join(missing)
+            )
+
+        else:
+
+            prn_source_df = uploaded_df[
+                required_cols
+            ].copy()
+
+            prn_file_name = (
+                uploaded_excel.name
+                .replace(".xlsx", "")
+                .replace(".xls", "")
+            )
+
+            source_description = (
+                f"Използва се каченият Excel: "
+                f"{uploaded_excel.name}"
+            )
+
+    except Exception as error:
+
+        st.error(
+            f"Грешка при четене на Excel: "
+            f"{error}"
         )
 
     # ==============================================
