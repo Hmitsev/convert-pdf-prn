@@ -2568,281 +2568,170 @@ if page == PAGE_PRN:
         )
 
     # ==============================================
-    # CREATE PRN
-    # ==============================================
+# PRN PREVIEW И ГЕНЕРИРАНЕ
+# ==============================================
 
-    if df is not None:
+if not prn_source_df.empty:
 
-        df = df.copy()
+    prn_source_df = prn_source_df.copy()
 
-        df.columns = [
-            str(col).strip()
-            for col in df.columns
-        ]
+    prn_source_df["Item"] = (
+        prn_source_df["Item"]
+        .astype(str)
+        .str.replace("⚠️", "", regex=False)
+        .str.replace("❗", "", regex=False)
+        .str.strip()
+    )
 
-        required_cols = [
-            "Item",
-            "Qty",
-            "Price 1 pc"
-        ]
+    prn_source_df["Qty"] = pd.to_numeric(
+        prn_source_df["Qty"],
+        errors="coerce"
+    ).fillna(0)
 
-        missing = [
-            col
-            for col in required_cols
-            if col not in df.columns
-        ]
+    prn_source_df["Price 1 pc"] = pd.to_numeric(
+        prn_source_df["Price 1 pc"],
+        errors="coerce"
+    ).fillna(0)
 
-        if missing:
+    prn_source_df = prn_source_df[
+        (
+            prn_source_df["Item"]
+            .astype(str)
+            .str.strip()
+            != ""
+        )
+        &
+        (
+            prn_source_df["Item"]
+            .astype(str)
+            .str.upper()
+            != "TOTAL"
+        )
+    ].copy()
 
-            st.error(
-                "Липсват необходимите колони: "
-                + ", ".join(missing)
+    st.success(source_description)
+
+    st.subheader("📋 PRN Preview")
+
+    edited_prn_df = st.data_editor(
+        prn_source_df,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        key="direct_prn_editor"
+    )
+
+    prn_lines = []
+
+    for _, row in edited_prn_df.iterrows():
+
+        item = str(
+            row.get("Item", "")
+        ).strip()
+
+        if (
+            item == ""
+            or item.lower() == "nan"
+            or item.upper() == "TOTAL"
+        ):
+            continue
+
+        try:
+
+            qty_value = float(
+                str(
+                    row.get("Qty", 0)
+                ).replace(",", ".")
             )
 
-        else:
-
-            prn_df = df[
-                required_cols
-            ].copy()
-
-            prn_df["Item"] = (
-                prn_df["Item"]
-                .astype(str)
-                .str.replace(
-                    "⚠️",
-                    "",
-                    regex=False
-                )
-                .str.replace(
-                    "❗",
-                    "",
-                    regex=False
-                )
-                .str.strip()
+            qty = int(
+                round(qty_value)
             )
 
-            prn_df["Qty"] = pd.to_numeric(
-                prn_df["Qty"]
-                .astype(str)
-                .str.replace(
-                    ",",
-                    ".",
-                    regex=False
-                ),
-                errors="coerce"
-            )
-
-            prn_df["Price 1 pc"] = pd.to_numeric(
-                prn_df["Price 1 pc"]
-                .astype(str)
-                .str.replace(
-                    ",",
-                    ".",
-                    regex=False
-                ),
-                errors="coerce"
-            )
-
-            # Премахва TOTAL и празните редове.
-            prn_df = prn_df[
-                (
-                    prn_df["Item"] != ""
-                )
-                &
-                (
-                    prn_df["Item"]
-                    .str.lower()
-                    != "nan"
-                )
-                &
-                (
-                    prn_df["Item"]
-                    .str.upper()
-                    != "TOTAL"
-                )
-            ].copy()
-
-            invalid_rows = prn_df[
-                prn_df["Qty"].isna()
-                |
-                prn_df["Price 1 pc"].isna()
-            ].copy()
-
-            valid_prn_df = prn_df[
-                prn_df["Qty"].notna()
-                &
-                prn_df["Price 1 pc"].notna()
-                &
-                (
-                    prn_df["Qty"] > 0
-                )
-                &
-                (
-                    prn_df["Price 1 pc"] >= 0
-                )
-            ].copy()
-
-            st.subheader(
-                "📋 PRN Preview"
-            )
-
-            edited_prn_df = st.data_editor(
-                valid_prn_df,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                key="prn_preview_editor",
-                column_config={
-                    "Item":
-                        st.column_config.TextColumn(
-                            "Item",
-                            required=True
-                        ),
-
-                    "Qty":
-                        st.column_config.NumberColumn(
-                            "Qty",
-                            min_value=0,
-                            step=1,
-                            format="%.0f"
-                        ),
-
-                    "Price 1 pc":
-                        st.column_config.NumberColumn(
-                            "Price 1 pc",
-                            min_value=0.0,
-                            format="%.6f"
-                        )
-                }
-            )
-
-            if not invalid_rows.empty:
-
-                st.warning(
-                    f"Пропуснати невалидни редове: "
-                    f"{len(invalid_rows)}"
-                )
-
-                with st.expander(
-                    "Покажи невалидните редове"
-                ):
-
-                    st.dataframe(
-                        invalid_rows,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-            prn_lines = []
-
-            for _, row in edited_prn_df.iterrows():
-
-                item = str(
+            price = float(
+                str(
                     row.get(
-                        "Item",
-                        ""
+                        "Price 1 pc",
+                        0
                     )
-                ).strip()
-
-                if (
-                    item == ""
-                    or
-                    item.lower() == "nan"
-                    or
-                    item.upper() == "TOTAL"
-                ):
-                    continue
-
-                try:
-
-                    qty = int(
-                        round(
-                            float(
-                                row["Qty"]
-                            )
-                        )
-                    )
-
-                    price = float(
-                        row["Price 1 pc"]
-                    )
-
-                except Exception:
-                    continue
-
-                if qty <= 0:
-                    continue
-
-                if price < 0:
-                    continue
-
-                price_str = (
-                    f"{price:.6f}"
-                    .replace(".", ",")
-                )
-
-                spaces_before_qty = max(
-                    1,
-                    25
-                    - len(item)
-                    - len(str(qty))
-                )
-
-                line = (
-                    item
-                    + (
-                        " "
-                        * spaces_before_qty
-                    )
-                    + str(qty)
-                    + (" " * 6)
-                    + price_str
-                )
-
-                prn_lines.append(
-                    line
-                )
-
-            prn_content = "\r\n".join(
-                prn_lines
+                ).replace(",", ".")
             )
 
-            st.metric(
-                "Готови PRN редове",
-                len(prn_lines)
+        except Exception:
+            continue
+
+        if qty == 0:
+            continue
+
+        price_str = (
+            f"{price:.6f}"
+            .replace(".", ",")
+        )
+
+        spaces_before_qty = max(
+            1,
+            25
+            - len(item)
+            - len(str(qty))
+        )
+
+        line = (
+            item
+            + (" " * spaces_before_qty)
+            + str(qty)
+            + (" " * 6)
+            + price_str
+        )
+
+        prn_lines.append(line)
+
+    prn_content = "\r\n".join(
+        prn_lines
+    )
+
+    st.download_button(
+        label="📥 Изтегли PRN",
+        data=prn_content.encode("utf-8"),
+        file_name=f"{prn_file_name}.prn",
+        mime="text/plain",
+        use_container_width=True,
+        key="download_generated_prn"
+    )
+
+    st.success(
+        f"✅ Генерирани PRN редове: "
+        f"{len(prn_lines)}"
+    )
+
+    if st.button(
+        "🧹 Изчисти заредения прием",
+        use_container_width=True,
+        key="clear_direct_prn"
+    ):
+
+        st.session_state.direct_prn_df = (
+            pd.DataFrame(
+                columns=[
+                    "Item",
+                    "Qty",
+                    "Price 1 pc"
+                ]
             )
+        )
 
-            if prn_lines:
+        st.session_state.direct_prn_name = (
+            "invoice"
+        )
 
-                st.text_area(
-                    "PRN съдържание",
-                    value=prn_content,
-                    height=250,
-                    key="prn_text_preview"
-                )
+        st.session_state["prn_loaded"] = False
 
-                st.download_button(
-                    label="📥 Изтегли PRN",
-                    data=prn_content.encode(
-                        "utf-8"
-                    ),
-                    file_name=(
-                        f"{invoice_name}.prn"
-                    ),
-                    mime="text/plain",
-                    use_container_width=True,
-                    key="download_generated_prn"
-                )
+        st.rerun()
 
-                st.success(
-                    f"✅ PRN файлът е готов. "
-                    f"Генерирани редове: "
-                    f"{len(prn_lines)}"
-                )
+else:
 
-            else:
-
-                st.warning(
-                    "Няма валидни редове "
-                    "за генериране на PRN."
-                )
+    st.info(
+        "Няма зареден прием. "
+        "Отвори PDF → Excel и натисни "
+        "'Зареди директно за PRN' "
+        "или качи Excel файл."
+    )
