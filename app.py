@@ -3393,43 +3393,43 @@ if page == "📄 PDF → Excel":
                     st.rerun()
         
         
-        # ==================================================
+                # ==================================================
         # CONTAINER PRN
         # ==================================================
-        
+
         if (
             has_container_data
             and
             container_col is not None
         ):
-        
+
             with container_col:
-        
+
                 if st.button(
                     "📦 Раздели по контейнери",
                     use_container_width=True,
                     key="load_containers_to_prn"
                 ):
-        
+
                     container_prn_data = (
                         prepare_container_prn_data(
                             final_result_df
                         )
                     )
-        
+
                     if not container_prn_data:
-        
+
                         st.error(
                             "Не бяха подготвени "
                             "валидни контейнерни PRN данни."
                         )
-        
+
                     else:
-        
+
                         st.session_state[
                             "container_prn_data"
                         ] = container_prn_data
-        
+
                         st.session_state[
                             "container_prn_invoice_name"
                         ] = (
@@ -3437,11 +3437,11 @@ if page == "📄 PDF → Excel":
                             if len(invoice_numbers) == 1
                             else "multiple_invoices"
                         )
-        
+
                         st.session_state[
                             "container_prn_loaded"
                         ] = True
-        
+
                         # Изчистваме стандартния PRN режим.
                         st.session_state[
                             "direct_prn_df"
@@ -3452,21 +3452,27 @@ if page == "📄 PDF → Excel":
                                 "Price 1 pc"
                             ]
                         )
-        
+
                         st.session_state[
                             "prn_loaded"
                         ] = False
-        
+
+                        # Задаваме страницата, която трябва
+                        # да се отвори след rerun.
                         st.session_state[
                             "converter_page"
                         ] = PAGE_PRN
-        
-                        st.session_state[
-                            "converter_menu"
-                        ] = PAGE_PRN
-        
+
+                        # converter_menu вече е създаден radio widget.
+                        # Не му присвояваме стойност директно.
+                        # Изтриваме старото му състояние, за да бъде
+                        # създаден наново според converter_page.
+                        st.session_state.pop(
+                            "converter_menu",
+                            None
+                        )
+
                         st.rerun()
-        
            
 # ======================================================
 # EXCEL → PRN
