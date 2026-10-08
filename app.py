@@ -3010,12 +3010,23 @@ if page == "📄 PDF → Excel":
 
         if cross_refs.empty:
 
-            st.error(
-                f"Няма Cross References за "
-                f"{selected_vendor_no}."
-            )
+            if cross_refs.empty:
 
-            st.stop()
+                st.warning(
+                    f"Няма Cross References за "
+                    f"{selected_vendor_no}. "
+                    f"Ще се покажат оригиналните номера."
+                )
+            
+                cross_refs = pd.DataFrame(
+                    columns=[
+                        "vendor_no",
+                        "cross_reference_no",
+                        "item_no",
+                        "normalized_cross_reference",
+                        "normalized_item_no"
+                    ]
+                )
 
         st.success(
             f"Cross References в Neon: "
