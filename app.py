@@ -3480,350 +3480,350 @@ if page == PAGE_PRN:
         """,
         unsafe_allow_html=True
     )
-    # ==================================================
-    # CONTAINER PRN MODE
-    # ==================================================
+# ==================================================
+# CONTAINER PRN MODE
+# ==================================================
 
-    if (
+if (
+    st.session_state.get(
+        "container_prn_loaded",
+        False
+    )
+    and
+    st.session_state.get(
+        "container_prn_data",
+        {}
+    )
+):
+
+    container_data = (
+        st.session_state[
+            "container_prn_data"
+        ]
+    )
+
+    invoice_name = str(
         st.session_state.get(
-            "container_prn_loaded",
-            False
+            "container_prn_invoice_name",
+            "invoice"
         )
-        and
-        st.session_state.get(
-            "container_prn_data",
-            {}
+    ).strip()
+
+    st.success(
+        f"✅ Контейнерният прием е зареден. "
+        f"Контейнери: {len(container_data)}"
+    )
+
+    total_rows = sum(
+        len(container_df)
+        for container_df
+        in container_data.values()
+    )
+
+    total_qty = sum(
+        pd.to_numeric(
+            container_df["Qty"],
+            errors="coerce"
         )
+        .fillna(0)
+        .sum()
+        for container_df
+        in container_data.values()
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "📦 Контейнери",
+            len(container_data)
+        )
+
+    with col2:
+        st.metric(
+            "📋 PRN редове",
+            total_rows
+        )
+
+    with col3:
+        st.metric(
+            "🔢 Общо количество",
+            int(round(total_qty))
+        )
+
+    st.markdown("---")
+
+    container_prn_contents = {}
+
+    for container_no, original_df in sorted(
+        container_data.items()
     ):
 
-        container_data = (
-            st.session_state[
-                "container_prn_data"
+        container_df = original_df.copy()
+
+        display_columns = [
+            column
+            for column in [
+                "Item",
+                "EAN",
+                "Qty",
+                "Price 1 pc"
             ]
-        )
+            if column in container_df.columns
+        ]
 
-        invoice_name = str(
-            st.session_state.get(
-                "container_prn_invoice_name",
-                "invoice"
-            )
-        ).strip()
+        display_df = container_df[
+            display_columns
+        ].copy()
 
-        st.success(
-            f"✅ Контейнерният прием е зареден. "
-            f"Контейнери: {len(container_data)}"
-        )
+        container_qty = pd.to_numeric(
+            display_df["Qty"],
+            errors="coerce"
+        ).fillna(0).sum()
 
-        total_rows = sum(
-            len(container_df)
-            for container_df
-            in container_data.values()
-        )
+        unmatched_count = 0
 
-        total_qty = sum(
-            pd.to_numeric(
-                container_df["Qty"],
-                errors="coerce"
-            )
-            .fillna(0)
-            .sum()
-            for container_df
-            in container_data.values()
-        )
+        if "_status" in container_df.columns:
 
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.metric(
-                "📦 Контейнери",
-                len(container_data)
+            unmatched_count = int(
+                (
+                    container_df["_status"]
+                    == "not_found"
+                ).sum()
             )
 
-        with col2:
-            st.metric(
-                "📋 PRN редове",
-                total_rows
-            )
-
-        with col3:
-            st.metric(
-                "🔢 Общо количество",
-                int(round(total_qty))
-            )
-
-        st.markdown("---")
-
-        container_prn_contents = {}
-
-        for container_no, original_df in sorted(
-            container_data.items()
+        with st.expander(
+            (
+                f"📦 {container_no} | "
+                f"Позиции: {len(display_df)} | "
+                f"Количество: "
+                f"{int(round(container_qty))}"
+            ),
+            expanded=True
         ):
 
-            container_df = original_df.copy()
+            if unmatched_count > 0:
 
-            display_columns = [
-                column
-                for column in [
+                st.warning(
+                    f"Ненамерени номера в Neon: "
+                    f"{unmatched_count}"
+                )
+
+            edited_df = st.data_editor(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key=(
+                    f"container_editor_"
+                    f"{container_no}"
+                ),
+                column_config={
+                    "Item":
+                        st.column_config.TextColumn(
+                            "Item",
+                            required=True
+                        ),
+
+                    "EAN":
+                        st.column_config.TextColumn(
+                            "EAN",
+                            disabled=True
+                        ),
+
+                    "Qty":
+                        st.column_config.NumberColumn(
+                            "Qty",
+                            min_value=0,
+                            step=1,
+                            format="%.0f"
+                        ),
+
+                    "Price 1 pc":
+                        st.column_config.NumberColumn(
+                            "Price 1 pc",
+                            min_value=0.0,
+                            format="%.6f"
+                        )
+                }
+            )
+
+            edited_prn_df = edited_df[
+                [
                     "Item",
-                    "EAN",
                     "Qty",
                     "Price 1 pc"
                 ]
-                if column in container_df.columns
-            ]
-
-            display_df = container_df[
-                display_columns
             ].copy()
 
-            container_qty = pd.to_numeric(
-                display_df["Qty"],
+            edited_prn_df["Item"] = (
+                edited_prn_df["Item"]
+                .fillna("")
+                .astype(str)
+                .str.replace(
+                    "⚠️",
+                    "",
+                    regex=False
+                )
+                .str.replace(
+                    "❗",
+                    "",
+                    regex=False
+                )
+                .str.strip()
+            )
+
+            edited_prn_df["Qty"] = pd.to_numeric(
+                edited_prn_df["Qty"],
                 errors="coerce"
-            ).fillna(0).sum()
+            )
 
-            unmatched_count = 0
-
-            if "_status" in container_df.columns:
-
-                unmatched_count = int(
-                    (
-                        container_df["_status"]
-                        == "not_found"
-                    ).sum()
-                )
-
-            with st.expander(
-                (
-                    f"📦 {container_no} | "
-                    f"Позиции: {len(display_df)} | "
-                    f"Количество: "
-                    f"{int(round(container_qty))}"
-                ),
-                expanded=True
-            ):
-
-                if unmatched_count > 0:
-
-                    st.warning(
-                        f"Ненамерени номера в Neon: "
-                        f"{unmatched_count}"
-                    )
-
-                edited_df = st.data_editor(
-                    display_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    key=(
-                        f"container_editor_"
-                        f"{container_no}"
-                    ),
-                    column_config={
-                        "Item":
-                            st.column_config.TextColumn(
-                                "Item",
-                                required=True
-                            ),
-
-                        "EAN":
-                            st.column_config.TextColumn(
-                                "EAN",
-                                disabled=True
-                            ),
-
-                        "Qty":
-                            st.column_config.NumberColumn(
-                                "Qty",
-                                min_value=0,
-                                step=1,
-                                format="%.0f"
-                            ),
-
-                        "Price 1 pc":
-                            st.column_config.NumberColumn(
-                                "Price 1 pc",
-                                min_value=0.0,
-                                format="%.6f"
-                            )
-                    }
-                )
-
-                edited_prn_df = edited_df[
-                    [
-                        "Item",
-                        "Qty",
-                        "Price 1 pc"
-                    ]
-                ].copy()
-
-                edited_prn_df["Item"] = (
-                    edited_prn_df["Item"]
-                    .fillna("")
-                    .astype(str)
-                    .str.replace(
-                        "⚠️",
-                        "",
-                        regex=False
-                    )
-                    .str.replace(
-                        "❗",
-                        "",
-                        regex=False
-                    )
-                    .str.strip()
-                )
-
-                edited_prn_df["Qty"] = pd.to_numeric(
-                    edited_prn_df["Qty"],
-                    errors="coerce"
-                )
-
+            edited_prn_df[
+                "Price 1 pc"
+            ] = pd.to_numeric(
                 edited_prn_df[
                     "Price 1 pc"
-                ] = pd.to_numeric(
+                ],
+                errors="coerce"
+            )
+
+            edited_prn_df = edited_prn_df[
+                (
+                    edited_prn_df["Item"] != ""
+                )
+                &
+                (
+                    edited_prn_df["Qty"].notna()
+                )
+                &
+                (
                     edited_prn_df[
                         "Price 1 pc"
-                    ],
-                    errors="coerce"
+                    ].notna()
+                )
+                &
+                (
+                    edited_prn_df["Qty"] > 0
+                )
+                &
+                (
+                    edited_prn_df[
+                        "Price 1 pc"
+                    ] >= 0
+                )
+            ].copy()
+
+            prn_content = create_prn_content(
+                edited_prn_df
+            )
+
+            container_prn_contents[
+                container_no
+            ] = prn_content
+
+            if prn_content:
+
+                st.text_area(
+                    "PRN съдържание",
+                    value=prn_content,
+                    height=180,
+                    key=(
+                        f"container_preview_"
+                        f"{container_no}"
+                    )
                 )
 
-                edited_prn_df = edited_prn_df[
-                    (
-                        edited_prn_df["Item"] != ""
+                st.download_button(
+                    label=(
+                        f"📥 Изтегли "
+                        f"{container_no}.prn"
+                    ),
+                    data=prn_content.encode(
+                        "utf-8"
+                    ),
+                    file_name=(
+                        f"{container_no}.prn"
+                    ),
+                    mime="text/plain",
+                    use_container_width=True,
+                    key=(
+                        f"download_container_"
+                        f"{container_no}"
                     )
-                    &
-                    (
-                        edited_prn_df["Qty"].notna()
-                    )
-                    &
-                    (
-                        edited_prn_df[
-                            "Price 1 pc"
-                        ].notna()
-                    )
-                    &
-                    (
-                        edited_prn_df["Qty"] > 0
-                    )
-                    &
-                    (
-                        edited_prn_df[
-                            "Price 1 pc"
-                        ] >= 0
-                    )
-                ].copy()
-
-                prn_content = create_prn_content(
-                    edited_prn_df
                 )
 
-                container_prn_contents[
-                    container_no
-                ] = prn_content
+            else:
 
-                if prn_content:
+                st.warning(
+                    "Няма валидни PRN редове "
+                    "за този контейнер."
+                )
 
-                    st.text_area(
-                        "PRN съдържание",
-                        value=prn_content,
-                        height=180,
-                        key=(
-                            f"container_preview_"
-                            f"{container_no}"
-                        )
-                    )
+    valid_contents = {
+        container_no: content
+        for container_no, content
+        in container_prn_contents.items()
+        if content
+    }
 
-                    st.download_button(
-                        label=(
-                            f"📥 Изтегли "
-                            f"{container_no}.prn"
-                        ),
-                        data=prn_content.encode(
-                            "utf-8"
-                        ),
-                        file_name=(
-                            f"{container_no}.prn"
-                        ),
-                        mime="text/plain",
-                        use_container_width=True,
-                        key=(
-                            f"download_container_"
-                            f"{container_no}"
-                        )
-                    )
+    if valid_contents:
 
-                else:
+        zip_output = create_container_prn_zip(
+            valid_contents
+        )
 
-                    st.warning(
-                        "Няма валидни PRN редове "
-                        "за този контейнер."
-                    )
+        safe_invoice_name = re.sub(
+            r"[^A-Z0-9\-_]",
+            "_",
+            invoice_name,
+            flags=re.IGNORECASE
+        )
 
-        valid_contents = {
-            container_no: content
-            for container_no, content
-            in container_prn_contents.items()
-            if content
-        }
+        st.markdown("---")
 
-        if valid_contents:
-
-            zip_output = create_container_prn_zip(
-                valid_contents
-            )
-
-            safe_invoice_name = re.sub(
-                r"[^A-Z0-9\-_]",
-                "_",
-                invoice_name,
-                flags=re.IGNORECASE
-            )
-
-            st.markdown("---")
-
-            st.download_button(
-                label=(
-                    "📦 Изтегли всички "
-                    "контейнерни PRN файлове"
-                ),
-                data=zip_output.getvalue(),
-                file_name=(
-                    f"{safe_invoice_name}"
-                    f"_containers_prn.zip"
-                ),
-                mime="application/zip",
-                use_container_width=True,
-                key="download_all_container_prn"
-            )
-
-            st.success(
-                f"✅ ZIP файлът съдържа "
-                f"{len(valid_contents)} PRN файла."
-            )
-
-        if st.button(
-            "🧹 Изчисти контейнерния прием",
+        st.download_button(
+            label=(
+                "📦 Изтегли всички "
+                "контейнерни PRN файлове"
+            ),
+            data=zip_output.getvalue(),
+            file_name=(
+                f"{safe_invoice_name}"
+                f"_containers_prn.zip"
+            ),
+            mime="application/zip",
             use_container_width=True,
-            key="clear_container_prn"
-        ):
+            key="download_all_container_prn"
+        )
 
-            st.session_state[
-                "container_prn_data"
-            ] = {}
+        st.success(
+            f"✅ ZIP файлът съдържа "
+            f"{len(valid_contents)} PRN файла."
+        )
 
-            st.session_state[
-                "container_prn_invoice_name"
-            ] = "invoice"
+    if st.button(
+        "🧹 Изчисти контейнерния прием",
+        use_container_width=True,
+        key="clear_container_prn"
+    ):
 
-            st.session_state[
-                "container_prn_loaded"
-            ] = False
+        st.session_state[
+            "container_prn_data"
+        ] = {}
 
-            st.rerun()
+        st.session_state[
+            "container_prn_invoice_name"
+        ] = "invoice"
 
-        # Не изпълнява стандартния PRN екран,
-        # когато работим в контейнерен режим.
-        st.stop()
+        st.session_state[
+            "container_prn_loaded"
+        ] = False
+
+        st.rerun()
+
+    # Не изпълнява стандартния PRN екран,
+    # когато работим в контейнерен режим.
+    st.stop()
 
     # ==================================================
     # SESSION STATE
