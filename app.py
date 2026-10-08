@@ -1828,9 +1828,6 @@ def extract_container_invoice_rows(pdf_file):
             "container_no":
                 container_no,
 
-            "seal_no":
-                seal_no,
-
             "container_qty":
                 container_qty,
 
