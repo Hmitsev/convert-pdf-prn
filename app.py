@@ -199,7 +199,7 @@ def get_connection():
 # LOAD VENDORS
 # ======================================================
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=600)
 def load_vendors():
 
     conn = psycopg2.connect(
