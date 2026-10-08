@@ -4,6 +4,7 @@ import psycopg2
 import base64
 import io
 import re
+import zipfile
 import pdfplumber
 from psycopg2.extras import RealDictCursor
 from openpyxl.styles import (
@@ -270,6 +271,18 @@ if "prn_invoice_name" not in st.session_state:
 
 if "prn_source" not in st.session_state:
     st.session_state.prn_source = ""
+# ======================================================
+# SESSION STATE - CONTAINER PRN
+# ======================================================
+
+if "container_prn_data" not in st.session_state:
+    st.session_state.container_prn_data = {}
+
+if "container_prn_invoice_name" not in st.session_state:
+    st.session_state.container_prn_invoice_name = "invoice"
+
+if "container_prn_loaded" not in st.session_state:
+    st.session_state.container_prn_loaded = False
 # ======================================================
 # SIDEBAR
 # ======================================================
@@ -1414,7 +1427,672 @@ def extract_motul_rows(pdf_file):
         "pages": processed_pages,
         "rows": rows
     }
-                
+ # ======================================================
+# CONTAINER INVOICE DETECTION
+# ======================================================
+
+def is_container_invoice_pdf(pdf_file):
+    """
+    Разпознава фактура от типа:
+
+    Packing List:
+    EAN + Description + Container No. + Seal No. + Qty + Weight
+
+    Commercial Invoice:
+    EAN + Description + Qty + Unit Price + Amount
+    """
+
+    pdf_file.seek(0)
+
+    detection_text = ""
+
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+
+            for page in pdf.pages[:2]:
+
+                page_text = page.extract_text(
+                    x_tolerance=2,
+                    y_tolerance=3
+                )
+
+                if page_text:
+                    detection_text += (
+                        page_text.upper()
+                        + "\n"
+                    )
+
+    except Exception:
+        pdf_file.seek(0)
+        return False
+
+    pdf_file.seek(0)
+
+    required_markers = [
+        "EAN CODES",
+        "CONTAINER NO",
+        "SEAL NO",
+        "UNIT PRICE",
+        "AMOUNT"
+    ]
+
+    found_markers = sum(
+        1
+        for marker in required_markers
+        if marker in detection_text
+    )
+
+    # Приемаме PDF-а за контейнерна фактура,
+    # ако са открити поне 4 от основните маркери.
+    return found_markers >= 4
+
+
+# ======================================================
+# CONTAINER INVOICE NUMBER
+# ======================================================
+
+def extract_container_invoice_number(
+    complete_text,
+    fallback_file_name
+):
+    """
+    Поддържа буквено-цифрови номера като:
+
+    GTH2673598AO
+    """
+
+    patterns = [
+        r"INVOICE\s+NO\.?\s*[:#]?\s*"
+        r"([A-Z0-9][A-Z0-9\-_/]+)",
+
+        r"INVOICE\s+NUMBER\s*[:#]?\s*"
+        r"([A-Z0-9][A-Z0-9\-_/]+)"
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            complete_text,
+            re.IGNORECASE
+        )
+
+        if match:
+
+            invoice_number = (
+                match.group(1)
+                .strip()
+            )
+
+            invoice_number = re.sub(
+                r"[^A-Z0-9\-_]",
+                "",
+                invoice_number,
+                flags=re.IGNORECASE
+            )
+
+            if invoice_number:
+                return invoice_number
+
+    return re.sub(
+        r"\.pdf$",
+        "",
+        fallback_file_name,
+        flags=re.IGNORECASE
+    )
+
+
+# ======================================================
+# NORMALIZE EAN
+# ======================================================
+
+def normalize_ean(value):
+
+    if value is None:
+        return ""
+
+    ean = re.sub(
+        r"\D",
+        "",
+        str(value)
+    )
+
+    return ean.strip()
+
+
+# ======================================================
+# CONTAINER PDF PARSER
+# ======================================================
+
+def extract_container_invoice_rows(pdf_file):
+    """
+    Извлича позиции от комбиниран PDF:
+
+    1. Packing List:
+       EAN
+       Description
+       Container No.
+       Seal No.
+       Container Qty
+       Weight
+
+    2. Commercial Invoice:
+       EAN
+       Description
+       Total Qty
+       Unit Price
+       Amount
+
+    Свързването между двете части се извършва по EAN.
+
+    Крайният резултат съдържа отделен ред за:
+    EAN + Container + Container Qty + Unit Price
+    """
+
+    rows = []
+    complete_text = ""
+    processed_pages = 0
+    document_lines = []
+
+    pdf_file.seek(0)
+
+    with pdfplumber.open(pdf_file) as pdf:
+
+        processed_pages = len(pdf.pages)
+
+        for page_number, page in enumerate(
+            pdf.pages,
+            start=1
+        ):
+
+            page_text = page.extract_text(
+                x_tolerance=2,
+                y_tolerance=3
+            )
+
+            if not page_text:
+                continue
+
+            complete_text += (
+                page_text
+                + "\n"
+            )
+
+            for original_line in page_text.splitlines():
+
+                clean_line = " ".join(
+                    str(original_line).split()
+                )
+
+                if not clean_line:
+                    continue
+
+                document_lines.append({
+                    "page": page_number,
+                    "text": clean_line
+                })
+
+    # Един нормализиран текст позволява parser-ът
+    # да работи и когато PDF извличането разделя
+    # една позиция между няколко визуални реда.
+    normalized_document_text = " ".join(
+        line_data["text"]
+        for line_data in document_lines
+    )
+
+    normalized_document_text = re.sub(
+        r"\s+",
+        " ",
+        normalized_document_text
+    ).strip()
+
+    # ==================================================
+    # РАЗДЕЛЯНЕ НА PACKING LIST И COMMERCIAL INVOICE
+    # ==================================================
+
+    commercial_header_patterns = [
+        (
+            r"EAN\s+CODES?\s+"
+            r"DESCRIPTION\s+"
+            r"QTY\s+"
+            r"UNIT\s+PRICE\s*"
+            r"AMOUNT"
+        ),
+        (
+            r"EAN\s+CODES?\s+"
+            r"DESCRIPTION\s+"
+            r"QTY\s+"
+            r"UNIT\s+PRICE"
+        )
+    ]
+
+    commercial_start = None
+
+    for header_pattern in commercial_header_patterns:
+
+        header_match = re.search(
+            header_pattern,
+            normalized_document_text,
+            re.IGNORECASE
+        )
+
+        if header_match:
+
+            commercial_start = (
+                header_match.end()
+            )
+
+            break
+
+    if commercial_start is None:
+
+        return {
+            "invoice_number":
+                extract_container_invoice_number(
+                    complete_text,
+                    pdf_file.name
+                ),
+
+            "pages":
+                processed_pages,
+
+            "rows":
+                [],
+
+            "containers":
+                [],
+
+            "packing_rows_count":
+                0,
+
+            "invoice_prices_count":
+                0,
+
+            "warnings": [
+                (
+                    "Не е намерено началото на "
+                    "Commercial Invoice таблицата."
+                )
+            ]
+        }
+
+    packing_text = (
+        normalized_document_text[
+            :commercial_start
+        ]
+    )
+
+    commercial_text = (
+        normalized_document_text[
+            commercial_start:
+        ]
+    )
+
+    # ==================================================
+    # PACKING LIST
+    # ==================================================
+
+    packing_rows = []
+
+    # Примерна позиция:
+    #
+    # 8859903117023
+    # TH205/55R16PR[SW608]91H TRAZANO TL UL
+    # HASU4554985
+    # ML-TH1226702
+    # 549
+    # 4609.00
+    #
+    # Container:
+    # четири букви + седем цифри
+    #
+    # Seal:
+    # буквено-цифров код с тире
+
+    packing_pattern = re.compile(
+        r"(?P<ean>\d{13})"
+        r"\s+"
+        r"(?P<description>.*?)"
+        r"\s+"
+        r"(?P<container>[A-Z]{4}\d{7})"
+        r"\s+"
+        r"(?P<seal>[A-Z0-9]+(?:-[A-Z0-9]+)+)"
+        r"\s+"
+        r"(?P<qty>\d+(?:[.,]\d+)?)"
+        r"\s+"
+        r"(?P<weight>\d+(?:[.,]\d+)?)"
+        r"(?="
+        r"\s+\d{13}"
+        r"|"
+        r"\s+\d+(?:[.,]\d+)?"
+        r"\s+\d+(?:[.,]\d+)?"
+        r"\s+\d{13}"
+        r"|"
+        r"\s+TO:"
+        r"|"
+        r"\s+INVOICE"
+        r"|"
+        r"$"
+        r")",
+        re.IGNORECASE
+    )
+
+    for match in packing_pattern.finditer(
+        packing_text
+    ):
+
+        ean = normalize_ean(
+            match.group("ean")
+        )
+
+        description = " ".join(
+            match.group("description").split()
+        ).strip()
+
+        container_no = (
+            match.group("container")
+            .upper()
+            .strip()
+        )
+
+        seal_no = (
+            match.group("seal")
+            .upper()
+            .strip()
+        )
+
+        container_qty = parse_european_number(
+            match.group("qty")
+        )
+
+        weight = parse_european_number(
+            match.group("weight")
+        )
+
+        if len(ean) != 13:
+            continue
+
+        if container_qty is None:
+            continue
+
+        if container_qty <= 0:
+            continue
+
+        packing_rows.append({
+            "ean":
+                ean,
+
+            "description":
+                description,
+
+            "container_no":
+                container_no,
+
+            "seal_no":
+                seal_no,
+
+            "container_qty":
+                container_qty,
+
+            "weight":
+                weight
+        })
+
+    # ==================================================
+    # COMMERCIAL INVOICE PRICES
+    # ==================================================
+
+    invoice_price_rows = []
+
+    # Ограничаваме таблицата преди банковата
+    # информация и останалия текст след позициите.
+    commercial_end_patterns = [
+        r"\s+FUND\s+FOR\s+FEW\s+CLAIMS",
+        r"\s+BANK\s+INFO",
+        r"\s+TOTAL\s+VALUE",
+        r"\s+SELLER:"
+    ]
+
+    commercial_products_text = (
+        commercial_text
+    )
+
+    commercial_end_positions = []
+
+    for end_pattern in commercial_end_patterns:
+
+        end_match = re.search(
+            end_pattern,
+            commercial_products_text,
+            re.IGNORECASE
+        )
+
+        if end_match:
+            commercial_end_positions.append(
+                end_match.start()
+            )
+
+    if commercial_end_positions:
+
+        commercial_products_text = (
+            commercial_products_text[
+                :min(commercial_end_positions)
+            ]
+        )
+
+    # Позицията се отделя до следващия EAN.
+    invoice_block_pattern = re.compile(
+        r"(?P<ean>\d{13})"
+        r"\s*"
+        r"(?P<body>.*?)"
+        r"(?="
+        r"\s+\d{13}"
+        r"|"
+        r"$"
+        r")",
+        re.IGNORECASE
+    )
+
+    for block_match in invoice_block_pattern.finditer(
+        commercial_products_text
+    ):
+
+        ean = normalize_ean(
+            block_match.group("ean")
+        )
+
+        body = " ".join(
+            block_match.group("body").split()
+        ).strip()
+
+        if len(ean) != 13:
+            continue
+
+        if not body:
+            continue
+
+        # В края на всяка invoice позиция очакваме:
+        #
+        # Qty + Unit Price + Amount
+        #
+        # Използваме търсене от края на блока.
+        numeric_tail_pattern = re.compile(
+            r"^(?P<description>.*?)"
+            r"\s*"
+            r"(?P<qty>\d+)"
+            r"\s+"
+            r"(?P<unit_price>"
+            r"\d+(?:[.,]\d+)?"
+            r")"
+            r"\s+"
+            r"(?P<amount>"
+            r"\d+(?:[.,]\d+)?"
+            r")"
+            r"\s*$",
+            re.IGNORECASE
+        )
+
+        numeric_match = numeric_tail_pattern.match(
+            body
+        )
+
+        if not numeric_match:
+            continue
+
+        description = " ".join(
+            numeric_match
+            .group("description")
+            .split()
+        ).strip()
+
+        invoice_qty = parse_european_number(
+            numeric_match.group("qty")
+        )
+
+        unit_price = parse_european_number(
+            numeric_match.group("unit_price")
+        )
+
+        invoice_amount = parse_european_number(
+            numeric_match.group("amount")
+        )
+
+        if invoice_qty is None:
+            continue
+
+        if unit_price is None:
+            continue
+
+        if invoice_amount is None:
+            continue
+
+        if invoice_qty <= 0:
+            continue
+
+        if unit_price < 0:
+            continue
+
+        expected_amount = (
+            invoice_qty
+            * unit_price
+        )
+
+        amount_tolerance = max(
+            0.05,
+            abs(invoice_amount) * 0.0001
+        )
+
+        calculation_ok = (
+            abs(
+                expected_amount
+                - invoice_amount
+            )
+            <= amount_tolerance
+        )
+
+        invoice_price_rows.append({
+            "ean":
+                ean,
+
+            "description":
+                description,
+
+            "invoice_qty":
+                invoice_qty,
+
+            "unit_price":
+                unit_price,
+
+            "invoice_amount":
+                invoice_amount,
+
+            "calculation_ok":
+                calculation_ok
+        })
+
+    # ==================================================
+    # PRICE INDEX ПО EAN
+    # ==================================================
+
+    price_index = {}
+
+    for price_row in invoice_price_rows:
+
+        ean = price_row["ean"]
+
+        # Първият валиден запис за EAN се пази.
+        if ean not in price_index:
+
+            price_index[ean] = price_row
+
+    # ==================================================
+    # JOIN:
+    # PACKING LIST + COMMERCIAL INVOICE
+    # ==================================================
+
+    warnings = []
+
+    for packing_row in packing_rows:
+
+        ean = packing_row["ean"]
+
+        price_data = price_index.get(
+            ean
+        )
+
+        if price_data is None:
+
+            warnings.append(
+                f"Няма цена в Commercial Invoice "
+                f"за EAN {ean}, контейнер "
+                f"{packing_row['container_no']}."
+            )
+
+            continue
+
+        container_qty = (
+            packing_row["container_qty"]
+        )
+
+        unit_price = (
+            price_data["unit_price"]
+        )
+
+        container_line_total = (
+            container_qty
+            * unit_price
+        )
+
+        rows.append({
+            # EAN е номерът, който се проверява
+            # в Cross Reference базата.
+            "invoice_item":
+                ean,
+
+            "normalized_invoice_item":
+                normalize_item_number(
+                    ean
+                ),
+
+            "description":
+                packing_row["description"],
+
+            "container_no":
+                packing_row["container_no"],
+
+            "seal_no":
+                packing_row["seal_no"],
+
+            "qty":
+                container_qty,
+
+            "price":
+                unit_price,
+
+            "line_total":
+                container_line_total,
+
+                        
 # ======================================================
 # BUILD FAST CROSS-REFERENCE INDEXES
 # ======================================================
@@ -1630,6 +2308,23 @@ def match_invoice_rows(
 
             "_page":
                 invoice_row["page"],
+            "_container_no":
+                invoice_row.get(
+                    "container_no",
+                    ""
+                ),
+            
+            "_seal_no":
+                invoice_row.get(
+                    "seal_no",
+                    ""
+                ),
+            
+            "_weight":
+                invoice_row.get(
+                    "weight",
+                    None
+                ),
 
             "_line_total":
                 invoice_row["line_total"],
@@ -1913,6 +2608,304 @@ def prepare_direct_prn_dataframe(result_df):
     ].copy()
 
     return prn_df.reset_index(drop=True)
+    # ======================================================
+# PREPARE PRN DATA BY CONTAINER
+# ======================================================
+
+def prepare_container_prn_data(result_df):
+    """
+    Разделя готовия резултат по контейнер.
+
+    Очаква result_df да съдържа:
+    - Item No.
+    - Qty
+    - Price 1 pc
+    - _container_no
+
+    Връща речник:
+
+    {
+        "HASU4554985": DataFrame,
+        "HASU4849034": DataFrame
+    }
+    """
+
+    container_data = {}
+
+    if result_df is None:
+        return container_data
+
+    if result_df.empty:
+        return container_data
+
+    if "_container_no" not in result_df.columns:
+        return container_data
+
+    working_df = result_df.copy()
+
+    working_df["_container_no"] = (
+        working_df["_container_no"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    # Оставяме само редовете с реален контейнер.
+    working_df = working_df[
+        working_df["_container_no"] != ""
+    ].copy()
+
+    if working_df.empty:
+        return container_data
+
+    for container_no, container_df in working_df.groupby(
+        "_container_no",
+        sort=True
+    ):
+
+        prn_df = pd.DataFrame()
+
+        # Item No. съдържа вътрешния Inter Cars номер
+        # след извършения Neon match.
+        prn_df["Item"] = (
+            container_df["Item No."]
+            .fillna("")
+            .astype(str)
+            .str.replace(
+                "⚠️",
+                "",
+                regex=False
+            )
+            .str.replace(
+                "❗",
+                "",
+                regex=False
+            )
+            .str.strip()
+        )
+
+        prn_df["Qty"] = pd.to_numeric(
+            container_df["Qty"],
+            errors="coerce"
+        )
+
+        prn_df["Price 1 pc"] = pd.to_numeric(
+            container_df["Price 1 pc"],
+            errors="coerce"
+        )
+
+        # Запазваме EAN само за визуална проверка.
+        if "Cross-Reference No." in container_df.columns:
+
+            prn_df["EAN"] = (
+                container_df[
+                    "Cross-Reference No."
+                ]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+                .values
+            )
+
+        # Запазваме статуса от Neon match-а.
+        if "_status" in container_df.columns:
+
+            prn_df["_status"] = (
+                container_df["_status"]
+                .fillna("")
+                .astype(str)
+                .values
+            )
+
+        # Премахва празни и технически редове.
+        prn_df = prn_df[
+            prn_df["Item"] != ""
+        ].copy()
+
+        prn_df = prn_df[
+            prn_df["Item"].str.lower() != "nan"
+        ].copy()
+
+        prn_df = prn_df[
+            prn_df["Item"].str.upper() != "TOTAL"
+        ].copy()
+
+        # Само редове с валидно количество и цена.
+        prn_df = prn_df[
+            prn_df["Qty"].notna()
+            &
+            prn_df["Price 1 pc"].notna()
+            &
+            (
+                prn_df["Qty"] > 0
+            )
+            &
+            (
+                prn_df["Price 1 pc"] >= 0
+            )
+        ].copy()
+
+        if prn_df.empty:
+            continue
+
+        container_data[
+            str(container_no).strip()
+        ] = prn_df.reset_index(
+            drop=True
+        )
+
+    return container_data
+
+
+# ======================================================
+# CREATE ONE PRN CONTENT
+# ======================================================
+
+def create_prn_content(prn_df):
+    """
+    Създава текстовото съдържание на един PRN файл.
+    """
+
+    prn_lines = []
+
+    if prn_df is None:
+        return ""
+
+    if prn_df.empty:
+        return ""
+
+    for _, row in prn_df.iterrows():
+
+        item = str(
+            row.get(
+                "Item",
+                ""
+            )
+        ).strip()
+
+        if (
+            item == ""
+            or item.lower() == "nan"
+            or item.upper() == "TOTAL"
+        ):
+            continue
+
+        try:
+            qty = int(
+                round(
+                    float(
+                        row.get(
+                            "Qty",
+                            0
+                        )
+                    )
+                )
+            )
+
+            price = float(
+                row.get(
+                    "Price 1 pc",
+                    0
+                )
+            )
+
+        except Exception:
+            continue
+
+        if qty <= 0:
+            continue
+
+        if price < 0:
+            continue
+
+        price_str = (
+            f"{price:.6f}"
+            .replace(".", ",")
+        )
+
+        spaces_before_qty = max(
+            1,
+            25
+            - len(item)
+            - len(str(qty))
+        )
+
+        prn_line = (
+            item
+            + (
+                " "
+                * spaces_before_qty
+            )
+            + str(qty)
+            + (" " * 6)
+            + price_str
+        )
+
+        prn_lines.append(
+            prn_line
+        )
+
+    return "\r\n".join(
+        prn_lines
+    )
+
+
+# ======================================================
+# CREATE ZIP WITH ALL CONTAINER PRN FILES
+# ======================================================
+
+def create_container_prn_zip(
+    container_prn_contents
+):
+    """
+    Получава речник:
+
+    {
+        "HASU4554985": "PRN content",
+        "HASU4849034": "PRN content"
+    }
+
+    и създава ZIP с отделен PRN файл
+    за всеки контейнер.
+    """
+
+    zip_output = io.BytesIO()
+
+    with zipfile.ZipFile(
+        zip_output,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED
+    ) as zip_file:
+
+        for (
+            container_no,
+            prn_content
+        ) in container_prn_contents.items():
+
+            if not prn_content:
+                continue
+
+            safe_container_no = re.sub(
+                r"[^A-Z0-9\-_]",
+                "_",
+                str(container_no).upper()
+            )
+
+            prn_file_name = (
+                f"{safe_container_no}.prn"
+            )
+
+            zip_file.writestr(
+                prn_file_name,
+                prn_content.encode(
+                    "utf-8"
+                )
+            )
+
+    zip_output.seek(0)
+
+    return zip_output
 # ======================================================
 # PDF → EXCEL
 # ======================================================
@@ -1975,23 +2968,36 @@ if page == "📄 PDF → Excel":
         ):
 
             for pdf_file in uploaded_pdfs:
+
+                # Нова контейнерна фактура:
+                # Packing List + Commercial Invoice
+                if is_container_invoice_pdf(
+                    pdf_file
+                ):
+            
+                    extracted = (
+                        extract_container_invoice_rows(
+                            pdf_file
+                        )
+                    )
+            
                 # Castrol
-                if selected_vendor_no == "VEN0002914":
-                
+                elif selected_vendor_no == "VEN0002914":
+            
                     extracted = extract_castrol_rows(
                         pdf_file
                     )
-                
+            
                 # Motul
                 elif selected_vendor_no == "VEN0001554":
-                
+            
                     extracted = extract_motul_rows(
                         pdf_file
                     )
-                
+            
                 # Federal и останалите доставчици
                 else:
-                
+            
                     extracted = extract_federal_rows(
                         pdf_file
                     )
@@ -2207,7 +3213,36 @@ if page == "📄 PDF → Excel":
             final_result_df
         )
         
-        download_col, prn_col = st.columns(2)
+        # Проверяваме дали резултатът съдържа контейнери.
+        has_container_data = (
+            "_container_no"
+            in final_result_df.columns
+            and
+            final_result_df[
+                "_container_no"
+            ]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .ne("")
+            .any()
+        )
+        
+        if has_container_data:
+        
+            download_col, prn_col, container_col = (
+                st.columns(3)
+            )
+        
+        else:
+        
+            download_col, prn_col = st.columns(2)
+            container_col = None
+        
+        
+        # ==================================================
+        # DOWNLOAD EXCEL
+        # ==================================================
         
         with download_col:
         
@@ -2223,7 +3258,143 @@ if page == "📄 PDF → Excel":
                 key="download_invoice_excel"
             )
         
+        
+        # ==================================================
+        # STANDARD SINGLE PRN
+        # ==================================================
+        
         with prn_col:
+        
+            if st.button(
+                "🧾 Зареди общо за PRN",
+                use_container_width=True,
+                key="load_current_invoice_to_prn"
+            ):
+        
+                direct_prn_df = (
+                    prepare_direct_prn_dataframe(
+                        final_result_df
+                    )
+                )
+        
+                if direct_prn_df.empty:
+        
+                    st.error(
+                        "Няма валидни редове "
+                        "за зареждане в PRN."
+                    )
+        
+                else:
+        
+                    st.session_state[
+                        "direct_prn_df"
+                    ] = direct_prn_df.copy()
+        
+                    st.session_state[
+                        "direct_prn_name"
+                    ] = (
+                        str(invoice_numbers[0])
+                        if len(invoice_numbers) == 1
+                        else "multiple_invoices"
+                    )
+        
+                    # Изчистваме контейнерния режим.
+                    st.session_state[
+                        "container_prn_data"
+                    ] = {}
+        
+                    st.session_state[
+                        "container_prn_loaded"
+                    ] = False
+        
+                    st.session_state[
+                        "converter_page"
+                    ] = PAGE_PRN
+        
+                    st.session_state[
+                        "converter_menu"
+                    ] = PAGE_PRN
+        
+                    st.session_state[
+                        "prn_loaded"
+                    ] = True
+        
+                    st.rerun()
+        
+        
+        # ==================================================
+        # CONTAINER PRN
+        # ==================================================
+        
+        if (
+            has_container_data
+            and
+            container_col is not None
+        ):
+        
+            with container_col:
+        
+                if st.button(
+                    "📦 Раздели по контейнери",
+                    use_container_width=True,
+                    key="load_containers_to_prn"
+                ):
+        
+                    container_prn_data = (
+                        prepare_container_prn_data(
+                            final_result_df
+                        )
+                    )
+        
+                    if not container_prn_data:
+        
+                        st.error(
+                            "Не бяха подготвени "
+                            "валидни контейнерни PRN данни."
+                        )
+        
+                    else:
+        
+                        st.session_state[
+                            "container_prn_data"
+                        ] = container_prn_data
+        
+                        st.session_state[
+                            "container_prn_invoice_name"
+                        ] = (
+                            str(invoice_numbers[0])
+                            if len(invoice_numbers) == 1
+                            else "multiple_invoices"
+                        )
+        
+                        st.session_state[
+                            "container_prn_loaded"
+                        ] = True
+        
+                        # Изчистваме стандартния PRN режим.
+                        st.session_state[
+                            "direct_prn_df"
+                        ] = pd.DataFrame(
+                            columns=[
+                                "Item",
+                                "Qty",
+                                "Price 1 pc"
+                            ]
+                        )
+        
+                        st.session_state[
+                            "prn_loaded"
+                        ] = False
+        
+                        st.session_state[
+                            "converter_page"
+                        ] = PAGE_PRN
+        
+                        st.session_state[
+                            "converter_menu"
+                        ] = PAGE_PRN
+        
+                        st.rerun()
         
             if st.button(
                 "🧾 Зареди директно за PRN",
