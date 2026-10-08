@@ -3387,10 +3387,6 @@ if page == "📄 PDF → Excel":
                     ] = PAGE_PRN
         
                     st.session_state[
-                        "converter_menu"
-                    ] = PAGE_PRN
-        
-                    st.session_state[
                         "prn_loaded"
                     ] = True
         
