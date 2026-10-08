@@ -2023,9 +2023,9 @@ def extract_container_invoice_rows(pdf_file):
             price_index[ean] = price_row
 
     # ==================================================
-# JOIN:
-# PACKING LIST + COMMERCIAL INVOICE
-# ==================================================
+    # JOIN:
+    # PACKING LIST + COMMERCIAL INVOICE
+    # ==================================================
 
     warnings = []
 
@@ -2074,9 +2074,6 @@ def extract_container_invoice_rows(pdf_file):
 
             "container_no":
                 packing_row["container_no"],
-
-            "seal_no":
-                packing_row["seal_no"],
 
             "qty":
                 container_qty,
