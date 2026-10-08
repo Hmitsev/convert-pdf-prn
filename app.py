@@ -1795,11 +1795,6 @@ def extract_container_invoice_rows(pdf_file):
             .strip()
         )
 
-        seal_no = (
-            match.group("seal")
-            .upper()
-            .strip()
-        )
 
         container_qty = parse_european_number(
             match.group("qty")
@@ -2286,31 +2281,7 @@ def match_invoice_rows(
         normalized_item = invoice_row[
             "normalized_invoice_item"
         ]
-        if invoice_item == "6938112623173":
-
-            st.write(
-                "PDF ITEM:",
-                invoice_item
-            )
         
-            st.write(
-                "NORMALIZED ITEM:",
-                normalized_item
-            )
-        
-            st.write(
-                "DIRECT INDEX EXISTS:",
-                normalized_item in direct_index
-            )
-        
-            if normalized_item in direct_index:
-        
-                st.write(
-                    direct_index[
-                        normalized_item
-                    ]
-                )
-
         quantity = invoice_row["qty"]
         price = invoice_row["price"]
 
