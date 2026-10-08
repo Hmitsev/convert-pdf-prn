@@ -3460,47 +3460,7 @@ if page == "📄 PDF → Excel":
         
                         st.rerun()
         
-            if st.button(
-                "🧾 Зареди директно за PRN",
-                use_container_width=True,
-                key="load_current_invoice_to_prn"
-            ):
-        
-                direct_prn_df = prepare_direct_prn_dataframe(
-                    final_result_df
-                )
-        
-                if direct_prn_df.empty:
-        
-                    st.error(
-                        "Няма валидни редове за зареждане в PRN."
-                    )
-        
-                else:
-        
-                    st.session_state["direct_prn_df"] = (
-                        direct_prn_df.copy()
-                    )
-        
-                    st.session_state["direct_prn_name"] = (
-                        str(invoice_numbers[0])
-                        if len(invoice_numbers) == 1
-                        else "multiple_invoices"
-                    )
-        
-                    st.session_state["converter_page"] = (
-                        PAGE_PRN
-                    )
-        
-                    st.session_state["prn_loaded"] = True
-
-                    st.success(
-                        f"✅ Приемът е изпратен към PRN модула."
-                        f"\n\nРедове: {len(direct_prn_df)}"
-                    )
-        
-                    st.rerun()
-    
+           
 # ======================================================
 # EXCEL → PRN
 # ======================================================
