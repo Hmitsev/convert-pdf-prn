@@ -3084,9 +3084,6 @@ if page == "📄 PDF → Excel":
                 detected_invoice_rows += len(
                     extracted["rows"]
                 )
-                if extracted["rows"]:
-                    st.write("FIRST PDF ROW")
-                    st.write(extracted["rows"][0])
 
                 matched_df = match_invoice_rows(
                     invoice_rows=extracted[
