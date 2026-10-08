@@ -3108,26 +3108,25 @@ if page == "📄 PDF → Excel":
             )
 
             st.stop()
-
         final_result_df = pd.concat(
             all_results,
             ignore_index=True
         )
 
-               final_result_df = (
-                    final_result_df
-                    .drop_duplicates(
-                        subset=[
-                            "_file",
-                            "_invoice_item",
-                            "_container_no",
-                            "Qty",
-                            "Price 1 pc",
-                            "_page"
-                        ]
-                    )
-                    .reset_index(drop=True)
-                )
+        final_result_df = (
+            final_result_df
+            .drop_duplicates(
+                subset=[
+                    "_file",
+                    "_invoice_item",
+                    "_container_no",
+                    "Qty",
+                    "Price 1 pc",
+                    "_page"
+                ]
+            )
+            .reset_index(drop=True)
+        )
 
         direct_count = int(
             (
