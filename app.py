@@ -2286,6 +2286,30 @@ def match_invoice_rows(
         normalized_item = invoice_row[
             "normalized_invoice_item"
         ]
+        if invoice_item == "6938112623173":
+
+            st.write(
+                "PDF ITEM:",
+                invoice_item
+            )
+        
+            st.write(
+                "NORMALIZED ITEM:",
+                normalized_item
+            )
+        
+            st.write(
+                "DIRECT INDEX EXISTS:",
+                normalized_item in direct_index
+            )
+        
+            if normalized_item in direct_index:
+        
+                st.write(
+                    direct_index[
+                        normalized_item
+                    ]
+                )
 
         quantity = invoice_row["qty"]
         price = invoice_row["price"]
@@ -3090,6 +3114,9 @@ if page == "📄 PDF → Excel":
                 detected_invoice_rows += len(
                     extracted["rows"]
                 )
+                if extracted["rows"]:
+                    st.write("FIRST PDF ROW")
+                    st.write(extracted["rows"][0])
 
                 matched_df = match_invoice_rows(
                     invoice_rows=extracted[
