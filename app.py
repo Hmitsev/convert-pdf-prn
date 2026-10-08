@@ -2026,9 +2026,9 @@ def extract_container_invoice_rows(pdf_file):
             price_index[ean] = price_row
 
     # ==================================================
-    # JOIN:
-    # PACKING LIST + COMMERCIAL INVOICE
-    # ==================================================
+# JOIN:
+# PACKING LIST + COMMERCIAL INVOICE
+# ==================================================
 
     warnings = []
 
@@ -2064,8 +2064,6 @@ def extract_container_invoice_rows(pdf_file):
         )
 
         rows.append({
-            # EAN е номерът, който се проверява
-            # в Cross Reference базата.
             "invoice_item":
                 ean,
 
@@ -2092,6 +2090,72 @@ def extract_container_invoice_rows(pdf_file):
             "line_total":
                 container_line_total,
 
+            "weight":
+                packing_row.get(
+                    "weight",
+                    None
+                ),
+
+            "invoice_total_qty":
+                price_data["invoice_qty"],
+
+            "invoice_total_amount":
+                price_data["invoice_amount"],
+
+            "calculation_ok":
+                price_data["calculation_ok"],
+
+            "page":
+                1,
+
+            "source_line":
+                (
+                    f"{ean} | "
+                    f"{packing_row['container_no']} | "
+                    f"{container_qty} | "
+                    f"{unit_price}"
+                )
+        })
+
+    containers = sorted(
+        {
+            row["container_no"]
+            for row in rows
+            if row.get(
+                "container_no"
+            )
+        }
+    )
+
+    invoice_number = (
+        extract_container_invoice_number(
+            complete_text,
+            pdf_file.name
+        )
+    )
+
+    return {
+        "invoice_number":
+            invoice_number,
+
+        "pages":
+            processed_pages,
+
+        "rows":
+            rows,
+
+        "containers":
+            containers,
+
+        "packing_rows_count":
+            len(packing_rows),
+
+        "invoice_prices_count":
+            len(invoice_price_rows),
+
+        "warnings":
+            warnings
+    }
                         
 # ======================================================
 # BUILD FAST CROSS-REFERENCE INDEXES
