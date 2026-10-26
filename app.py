@@ -1470,85 +1470,316 @@ def extract_motul_rows(pdf_file):
         "pages": processed_pages,
         "rows": rows
     }
-    # ======================================================
+ # ======================================================
 # VALVOLINE PARSER
 # ======================================================
+
 def extract_valvoline_rows(pdf_file):
 
-    extracted = extract_federal_rows(
-        pdf_file
+    rows = []
+    full_text = ""
+    processed_pages = 0
+
+    pdf_file.seek(0)
+
+    with pdfplumber.open(pdf_file) as pdf:
+
+        processed_pages = len(pdf.pages)
+
+        for page_number, page in enumerate(
+            pdf.pages,
+            start=1
+        ):
+
+            page_text = page.extract_text(
+                x_tolerance=2,
+                y_tolerance=3
+            )
+
+            if not page_text:
+                continue
+
+            full_text += page_text + "\n"
+
+            lines = [
+                " ".join(str(line).split())
+                for line in page_text.splitlines()
+                if str(line).strip()
+            ]
+
+            for line_index, line in enumerate(lines):
+
+                # Valvoline продуктов ред.
+                #
+                # Пример:
+                # 1 364606 916497 VAL RESTORE...
+                #    Lit 600.00 6.8500 4,110.00...
+                #
+                # Cross Reference е третата колона.
+                item_match = re.match(
+                    r"^\s*"
+                    r"(\d+)\s+"
+                    r"(\d+)\s+"
+                    r"(\d{5,10})\s+"
+                    r"(.+)$",
+                    line
+                )
+
+                if not item_match:
+                    continue
+
+                position_no = (
+                    item_match.group(1).strip()
+                )
+
+                material_no = (
+                    item_match.group(2).strip()
+                )
+
+                invoice_item = (
+                    item_match.group(3).strip()
+                )
+
+                remaining_text = (
+                    item_match.group(4).strip()
+                )
+
+                # Търсим UoM + Qty + Unit Price + Amount.
+                #
+                # Поддържа например:
+                # Lit 600.00 6.8500 4,110.00
+                # case 73.00 93.2800 6,809.44
+
+                data_text = remaining_text
+
+                # Ако pdfplumber е разделил позицията
+                # между два визуални реда, добавяме
+                # няколко следващи реда.
+                for offset in range(1, 4):
+
+                    if re.search(
+                        r"\b(?:LIT|CASE)\b",
+                        data_text,
+                        re.IGNORECASE
+                    ):
+                        break
+
+                    next_index = (
+                        line_index + offset
+                    )
+
+                    if next_index >= len(lines):
+                        break
+
+                    data_text += (
+                        " " + lines[next_index]
+                    )
+
+                data_match = re.search(
+                    r"\b"
+                    r"(Lit|case)"
+                    r"\s+"
+                    r"([\d.,]+)"
+                    r"\s+"
+                    r"([\d.,]+)"
+                    r"\s+"
+                    r"([\d.,]+)",
+                    data_text,
+                    re.IGNORECASE
+                )
+
+                if not data_match:
+                    continue
+
+                invoice_unit = (
+                    data_match.group(1)
+                    .upper()
+                    .strip()
+                )
+
+                invoice_quantity = (
+                    parse_european_number(
+                        data_match.group(2)
+                    )
+                )
+
+                invoice_unit_price = (
+                    parse_european_number(
+                        data_match.group(3)
+                    )
+                )
+
+                line_total = (
+                    parse_european_number(
+                        data_match.group(4)
+                    )
+                )
+
+                if invoice_quantity is None:
+                    continue
+
+                if line_total is None:
+                    continue
+
+                if invoice_quantity <= 0:
+                    continue
+
+                if line_total < 0:
+                    continue
+
+                # Description е частта преди UoM.
+                description = re.split(
+                    r"\b(?:Lit|case)\b",
+                    remaining_text,
+                    maxsplit=1,
+                    flags=re.IGNORECASE
+                )[0].strip()
+
+                # Ако UoM е на следващ ред,
+                # remaining_text вече съдържа само
+                # началната част на Description.
+                if not description:
+                    description = remaining_text
+
+                # =====================================
+                # QUANTITY CONVERSION
+                # =====================================
+
+                final_quantity = invoice_quantity
+                pack_quantity = 1
+                pack_size = 1.0
+
+                if invoice_unit == "LIT":
+
+                    pack_size = (
+                        extract_valvoline_litre_size(
+                            description
+                        )
+                    )
+
+                    if pack_size > 0:
+                        final_quantity = (
+                            invoice_quantity
+                            / pack_size
+                        )
+
+                elif invoice_unit == "CASE":
+
+                    pack_quantity = (
+                        extract_valvoline_pack_quantity(
+                            description
+                        )
+                    )
+
+                    if pack_quantity > 0:
+                        final_quantity = (
+                            invoice_quantity
+                            * pack_quantity
+                        )
+
+                if final_quantity <= 0:
+                    continue
+
+                # =====================================
+                # FINAL PRICE PER PIECE
+                # =====================================
+
+                final_price = (
+                    line_total
+                    / final_quantity
+                )
+
+                final_price = round(
+                    final_price,
+                    10
+                )
+
+                calculated_total = (
+                    final_quantity
+                    * final_price
+                )
+
+                tolerance = max(
+                    0.02,
+                    abs(line_total) * 0.0001
+                )
+
+                calculation_ok = (
+                    abs(
+                        calculated_total
+                        - line_total
+                    )
+                    <= tolerance
+                )
+
+                rows.append({
+
+                    "invoice_item":
+                        invoice_item,
+
+                    "normalized_invoice_item":
+                        normalize_item_number(
+                            invoice_item
+                        ),
+
+                    "description":
+                        description,
+
+                    "position_no":
+                        position_no,
+
+                    "material_no":
+                        material_no,
+
+                    "invoice_qty":
+                        invoice_quantity,
+
+                    "invoice_unit":
+                        invoice_unit,
+
+                    "invoice_unit_price":
+                        invoice_unit_price,
+
+                    "pack_qty":
+                        pack_quantity,
+
+                    "pack_size":
+                        pack_size,
+
+                    "qty":
+                        final_quantity,
+
+                    "price":
+                        final_price,
+
+                    "line_total":
+                        line_total,
+
+                    "calculation_ok":
+                        calculation_ok,
+
+                    "page":
+                        page_number,
+
+                    "source_line":
+                        data_text
+                })
+
+    invoice_number = extract_invoice_number(
+        full_text,
+        pdf_file.name
     )
 
-    new_rows = []
+    return {
+        "invoice_number":
+            invoice_number,
 
-    for row in extracted["rows"]:
+        "pages":
+            processed_pages,
 
-        description = row.get(
-            "source_line",
-            ""
-        )
-
-        quantity = float(
-            row["qty"]
-        )
-
-        line_total = float(
-            row["line_total"]
-        )
-
-        final_qty = quantity
-
-        if " L " in (
-            " " + description.upper() + " "
-        ):
-
-            pack_size = (
-                extract_valvoline_litre_size(
-                    description
-                )
-            )
-
-            if pack_size > 0:
-                final_qty = (
-                    quantity / pack_size
-                )
-
-        elif re.search(
-            r'(\d+)\s*[XХ×]\s*\d+(?:[.,]\d+)?\s*L',
-            description,
-            re.IGNORECASE
-        ):
-
-            pack_qty = (
-                extract_valvoline_pack_quantity(
-                    description
-                )
-            )
-
-            final_qty = (
-                quantity * pack_qty
-            )
-
-        if final_qty <= 0:
-            final_qty = quantity
-
-        row["qty"] = round(
-            final_qty,
-            3
-        )
-
-        row["price"] = round(
-            line_total / final_qty,
-            6
-        )
-
-        new_rows.append(
-            row
-        )
-
-    extracted["rows"] = new_rows
-
-    return extracted
+        "rows":
+            rows
+    }
  # ======================================================
 # CONTAINER INVOICE DETECTION
 # ======================================================
