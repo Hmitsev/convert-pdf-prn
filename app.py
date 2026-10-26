@@ -978,40 +978,36 @@ def extract_valvoline_pack_quantity(description):
     if description is None:
         return 1
 
-    text = str(description).upper()
+    text = str(description).upper().strip()
+
+    # Поддържа:
+    # 4x4 L
+    # 4X5L
+    # 12x1 L
+    # 4/5 L
+    # 4/4 L
 
     match = re.search(
-        r'(\d+)\s*[XХ×]\s*(\d+(?:[.,]\d+)?)\s*L',
-        text
+        r'\b(\d+)\s*(?:[XХ×]|/)\s*'
+        r'\d+(?:[.,]\d+)?\s*L\b',
+        text,
+        re.IGNORECASE
     )
 
-    if match:
-        return int(match.group(1))
-
-    return 1
-
-
-def extract_valvoline_litre_size(description):
-
-    if description is None:
-        return 1
-
-    text = str(description).upper()
-
-    matches = re.findall(
-        r'(\d+(?:[.,]\d+)?)\s*L',
-        text
-    )
-
-    if not matches:
+    if not match:
         return 1
 
     try:
-        return float(
-            matches[-1].replace(",", ".")
+        pack_quantity = int(
+            match.group(1)
         )
-    except:
+    except Exception:
         return 1
+
+    if pack_quantity <= 0:
+        return 1
+
+    return pack_quantity
     
 # ======================================================
 # MOTUL PARSER
@@ -1627,19 +1623,23 @@ def extract_valvoline_rows(pdf_file):
                 if line_total < 0:
                     continue
 
-                # Description е частта преди UoM.
-                description = re.split(
-                    r"\b(?:Lit|case)\b",
-                    remaining_text,
-                    maxsplit=1,
-                    flags=re.IGNORECASE
-                )[0].strip()
+# =====================================
+# DESCRIPTION
+# =====================================
+# Използваме целия текст, събран до UoM.
+# Това е важно при Valvoline, защото
+# разфасовката може да е преместена
+# от pdfplumber на следващ визуален ред.
 
-                # Ако UoM е на следващ ред,
-                # remaining_text вече съдържа само
-                # началната част на Description.
-                if not description:
-                    description = remaining_text
+description = re.split(
+    r"\b(?:Lit|case)\b",
+    data_text,
+    maxsplit=1,
+    flags=re.IGNORECASE
+)[0].strip()
+
+if not description:
+    description = remaining_text
 
                 # =====================================
                 # QUANTITY CONVERSION
