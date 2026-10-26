@@ -971,6 +971,49 @@ def extract_motul_pack_quantity(description):
 
     return pack_quantity
 # ======================================================
+# VALVOLINE HELPERS
+# ======================================================
+def extract_valvoline_pack_quantity(description):
+
+    if description is None:
+        return 1
+
+    text = str(description).upper()
+
+    match = re.search(
+        r'(\d+)\s*[XХ×]\s*(\d+(?:[.,]\d+)?)\s*L',
+        text
+    )
+
+    if match:
+        return int(match.group(1))
+
+    return 1
+
+
+def extract_valvoline_litre_size(description):
+
+    if description is None:
+        return 1
+
+    text = str(description).upper()
+
+    matches = re.findall(
+        r'(\d+(?:[.,]\d+)?)\s*L',
+        text
+    )
+
+    if not matches:
+        return 1
+
+    try:
+        return float(
+            matches[-1].replace(",", ".")
+        )
+    except:
+        return 1
+    
+# ======================================================
 # MOTUL PARSER
 # ======================================================
 
@@ -1427,6 +1470,85 @@ def extract_motul_rows(pdf_file):
         "pages": processed_pages,
         "rows": rows
     }
+    # ======================================================
+# VALVOLINE PARSER
+# ======================================================
+def extract_valvoline_rows(pdf_file):
+
+    extracted = extract_federal_rows(
+        pdf_file
+    )
+
+    new_rows = []
+
+    for row in extracted["rows"]:
+
+        description = row.get(
+            "source_line",
+            ""
+        )
+
+        quantity = float(
+            row["qty"]
+        )
+
+        line_total = float(
+            row["line_total"]
+        )
+
+        final_qty = quantity
+
+        if " L " in (
+            " " + description.upper() + " "
+        ):
+
+            pack_size = (
+                extract_valvoline_litre_size(
+                    description
+                )
+            )
+
+            if pack_size > 0:
+                final_qty = (
+                    quantity / pack_size
+                )
+
+        elif re.search(
+            r'(\d+)\s*[XХ×]\s*\d+(?:[.,]\d+)?\s*L',
+            description,
+            re.IGNORECASE
+        ):
+
+            pack_qty = (
+                extract_valvoline_pack_quantity(
+                    description
+                )
+            )
+
+            final_qty = (
+                quantity * pack_qty
+            )
+
+        if final_qty <= 0:
+            final_qty = quantity
+
+        row["qty"] = round(
+            final_qty,
+            3
+        )
+
+        row["price"] = round(
+            line_total / final_qty,
+            6
+        )
+
+        new_rows.append(
+            row
+        )
+
+    extracted["rows"] = new_rows
+
+    return extracted
  # ======================================================
 # CONTAINER INVOICE DETECTION
 # ======================================================
@@ -3061,6 +3183,12 @@ if page == "📄 PDF → Excel":
                 elif selected_vendor_no == "VEN0001554":
             
                     extracted = extract_motul_rows(
+                        pdf_file
+                    )
+                # Valvoline
+                elif selected_vendor_no == "VEN0002867":
+                
+                    extracted = extract_valvoline_rows(
                         pdf_file
                     )
             
