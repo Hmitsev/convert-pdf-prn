@@ -1792,7 +1792,7 @@ packaging_search_text = product_text
 
         final_quantity = invoice_quantity
         pack_quantity = 1
-        pack_size = 1.0
+        pack_size = None
 
         # ----------------------------------------------
         # LIT
