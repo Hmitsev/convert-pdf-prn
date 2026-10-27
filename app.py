@@ -976,24 +976,51 @@ def extract_motul_pack_quantity(description):
 
 def extract_valvoline_pack_quantity(description):
     """
-    Извлича броя опаковки от case описание.
+    Извлича броя единични опаковки в един case.
+
+    Поддържа масла, греси, течности и други продукти.
 
     Примери:
-    4x4 L  -> 4
-    4/4 L  -> 4
-    4x5 L  -> 4
-    4/5 L  -> 4
-    12x1 L -> 12
+    4x4 L       -> 4
+    4/4 L       -> 4
+    4x5 L       -> 4
+    12x1 L      -> 12
+    12x500 ML   -> 12
+    24x400 G    -> 24
+    24/400 G    -> 24
+    12x1 KG     -> 12
+    6x2 KG      -> 6
     """
 
     if description is None:
         return 1
 
-    text = str(description).upper().strip()
+    text = " ".join(
+        str(description)
+        .upper()
+        .strip()
+        .split()
+    )
 
+    # Разпознава:
+    # 24x400 G
+    # 24/400 G
+    # 12x500 ML
+    # 12/1 KG
+    # 4x5 L
+    #
+    # Връща първото число, тоест броя опаковки
+    # в кашона.
     match = re.search(
-        r"\b(\d{1,4})\s*(?:[XХ×]|/)\s*"
-        r"\d+(?:[.,]\d+)?\s*L\b",
+        r"\b"
+        r"(\d{1,4})"
+        r"\s*"
+        r"(?:X|Х|×|/)"
+        r"\s*"
+        r"\d+(?:[.,]\d+)?"
+        r"\s*"
+        r"(?:G|GR|GRAM|GRAMS|KG|ML|CL|DL|L|LT|LTR)"
+        r"\b",
         text,
         re.IGNORECASE
     )
@@ -1002,7 +1029,9 @@ def extract_valvoline_pack_quantity(description):
         return 1
 
     try:
-        pack_quantity = int(match.group(1))
+        pack_quantity = int(
+            match.group(1)
+        )
     except Exception:
         return 1
 
