@@ -1060,17 +1060,17 @@ def extract_valvoline_litre_size(description):
     )
 
     if not litre_matches:
-        return 1.0
+        return None
 
     try:
         litre_size = float(
             litre_matches[-1].replace(",", ".")
         )
     except Exception:
-        return 1.0
+        return None
 
     if litre_size <= 0:
-        return 1.0
+        return None
 
     return litre_size
     
@@ -1800,18 +1800,19 @@ def extract_valvoline_rows(pdf_file):
 
         if invoice_unit == "LIT":
 
-            pack_size = (
-                extract_valvoline_litre_size(
-                    description
-                )
+            pack_size = extract_valvoline_litre_size(
+                description
             )
-
-            if pack_size > 0:
-
-                final_quantity = (
-                    invoice_quantity
-                    / pack_size
-                )
+        
+            if pack_size is None or pack_size <= 0:
+                # Не допускаме Lit позиция да мине тихо 1:1,
+                # ако разфасовката не е разпозната.
+                continue
+        
+            final_quantity = (
+                invoice_quantity
+                / pack_size
+            )
 
         # ----------------------------------------------
         # CASE
