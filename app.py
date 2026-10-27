@@ -1770,85 +1770,85 @@ def extract_valvoline_rows(pdf_file):
         if line_total < 0:
             continue
 
-# ==================================================
-# DESCRIPTION / PACKAGING TEXT
-# ==================================================
-# При някои Valvoline PDF-и разфасовката е визуално
-# на следващ ред и pdfplumber може да я постави след
-# финансовите данни. Затова пазим целия продуктов блок
-# за търсене на 20 L, 60 L, 208 L, 4x5 L и т.н.
-
-description = product_text[
-    :data_match.start()
-].strip()
-
-if not description:
-    description = item_data["remaining_text"]
-
-# ВАЖНО:
-# За разфасовката търсим в целия продуктов блок,
-# защото "20 L" може да е попаднало след финансовия ред.
-packaging_search_text = product_text
-
-
-# ==================================================
-# QUANTITY CONVERSION
-# ==================================================
-
-final_quantity = invoice_quantity
-pack_quantity = 1
-pack_size = None
-
-
-# ----------------------------------------------
-# LIT
-#
-# 600 Lit / 20 L = 30 броя
-# 208 Lit / 208 L = 1 брой
-# 120 Lit / 60 L = 2 броя
-# ----------------------------------------------
-
-if invoice_unit == "LIT":
-
-    pack_size = extract_valvoline_litre_size(
-        packaging_search_text
-    )
-
-    if pack_size is None or pack_size <= 0:
-        # Не допускаме Lit позиция да мине тихо 1:1,
-        # ако разфасовката не е разпозната.
-        continue
-
-    final_quantity = (
-        invoice_quantity
-        / pack_size
-    )
-
-
-# ----------------------------------------------
-# CASE
-#
-# 73 case * 4 = 292 броя
-# 72 case * 4 = 288 броя
-# 1 case * 12 = 12 броя
-# ----------------------------------------------
-
-elif invoice_unit == "CASE":
-
-    pack_quantity = extract_valvoline_pack_quantity(
-        packaging_search_text
-    )
-
-    if pack_quantity > 0:
-
-        final_quantity = (
-            invoice_quantity
-            * pack_quantity
-        )
-
-
-if final_quantity <= 0:
-    continue
+        # ==================================================
+        # DESCRIPTION / PACKAGING TEXT
+        # ==================================================
+        # При някои Valvoline PDF-и разфасовката е визуално
+        # на следващ ред и pdfplumber може да я постави след
+        # финансовите данни. Затова пазим целия продуктов блок
+        # за търсене на 20 L, 60 L, 208 L, 4x5 L и т.н.
+        
+        description = product_text[
+            :data_match.start()
+        ].strip()
+        
+        if not description:
+            description = item_data["remaining_text"]
+        
+        # ВАЖНО:
+        # За разфасовката търсим в целия продуктов блок,
+        # защото "20 L" може да е попаднало след финансовия ред.
+        packaging_search_text = product_text
+        
+        
+        # ==================================================
+        # QUANTITY CONVERSION
+        # ==================================================
+        
+        final_quantity = invoice_quantity
+        pack_quantity = 1
+        pack_size = None
+        
+        
+        # ----------------------------------------------
+        # LIT
+        #
+        # 600 Lit / 20 L = 30 броя
+        # 208 Lit / 208 L = 1 брой
+        # 120 Lit / 60 L = 2 броя
+        # ----------------------------------------------
+        
+        if invoice_unit == "LIT":
+        
+            pack_size = extract_valvoline_litre_size(
+                packaging_search_text
+            )
+        
+            if pack_size is None or pack_size <= 0:
+                # Не допускаме Lit позиция да мине тихо 1:1,
+                # ако разфасовката не е разпозната.
+                continue
+        
+            final_quantity = (
+                invoice_quantity
+                / pack_size
+            )
+        
+        
+        # ----------------------------------------------
+        # CASE
+        #
+        # 73 case * 4 = 292 броя
+        # 72 case * 4 = 288 броя
+        # 1 case * 12 = 12 броя
+        # ----------------------------------------------
+        
+        elif invoice_unit == "CASE":
+        
+            pack_quantity = extract_valvoline_pack_quantity(
+                packaging_search_text
+            )
+        
+            if pack_quantity > 0:
+        
+                final_quantity = (
+                    invoice_quantity
+                    * pack_quantity
+                )
+        
+        
+        if final_quantity <= 0:
+            continue
 
         # ==================================================
         # PRICE PER FINAL PIECE
