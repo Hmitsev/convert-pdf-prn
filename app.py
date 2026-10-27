@@ -1770,19 +1770,22 @@ def extract_valvoline_rows(pdf_file):
         if line_total < 0:
             continue
 
-        # ==================================================
-        # DESCRIPTION
-        # ==================================================
+# ==================================================
+# DESCRIPTION / PACKAGING TEXT
+# ==================================================
+# При някои Valvoline PDF-и разфасовката е визуално
+# на следващ ред и pdfplumber може да я постави след
+# финансовите данни. Затова пазим целия продуктов блок
+# за търсене на 20 L, 60 L, 208 L, 4x5 L и т.н.
 
-        description = product_text[
-            :data_match.start()
-        ].strip()
+description = product_text[
+    :data_match.start()
+].strip()
 
-        if not description:
-            description = (
-                item_data["remaining_text"]
-            )
+if not description:
+    description = item_data["remaining_text"]
 
+packaging_search_text = product_text
         # ==================================================
         # QUANTITY CONVERSION
         # ==================================================
@@ -1801,7 +1804,7 @@ def extract_valvoline_rows(pdf_file):
         if invoice_unit == "LIT":
 
             pack_size = extract_valvoline_litre_size(
-                description
+                packaging_search_text
             )
         
             if pack_size is None or pack_size <= 0:
@@ -1823,12 +1826,10 @@ def extract_valvoline_rows(pdf_file):
 
         elif invoice_unit == "CASE":
 
-            pack_quantity = (
-                extract_valvoline_pack_quantity(
-                    description
-                )
+            pack_quantity = extract_valvoline_pack_quantity(
+                packaging_search_text
             )
-
+        
             if pack_quantity > 0:
 
                 final_quantity = (
