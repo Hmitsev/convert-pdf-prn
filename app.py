@@ -1762,7 +1762,40 @@ def extract_valvoline_rows(pdf_file):
         match = item_pattern.match(
             line
         )
-
+        
+        # --------------------------------------------------
+        # VALVOLINE FALLBACK:
+        # PDF може да раздели началото на продукта
+        # между два визуални реда.
+        #
+        # Например:
+        # 31 123456
+        # 872591 SYNPOWER ENV C1 5W30 ...
+        # --------------------------------------------------
+        if not match:
+        
+            if line_index + 1 < len(document_lines):
+        
+                next_line = document_lines[
+                    line_index + 1
+                ]["text"]
+        
+                combined_line = (
+                    line
+                    + " "
+                    + next_line
+                )
+        
+                combined_line = re.sub(
+                    r"\s+",
+                    " ",
+                    combined_line
+                ).strip()
+        
+                match = item_pattern.match(
+                    combined_line
+                )
+        
         if not match:
             continue
 
