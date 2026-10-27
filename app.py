@@ -974,96 +974,159 @@ def extract_motul_pack_quantity(description):
 # VALVOLINE HELPERS
 # ======================================================
 
+def normalize_valvoline_packaging_text(value):
+    """
+    Нормализира различните варианти, които pdfplumber
+    може да върне:
+
+    20L       -> 20 L
+    4X5L      -> 4 X 5 L
+    4 x 5 L   -> 4 X 5 L
+    12/1L     -> 12 / 1 L
+    12×1 L    -> 12 X 1 L
+    60L       -> 60 L
+    """
+
+    if value is None:
+        return ""
+
+    text = str(value).upper()
+
+    text = (
+        text
+        .replace("×", "X")
+        .replace("Х", "X")
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    ).strip()
+
+    # 20L -> 20 L
+    text = re.sub(
+        r"(\d)\s*(ML|CL|DL|LTR|LT|KG|GR|G|L)\b",
+        r"\1 \2",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    # 4X5 / 4 X 5 -> 4 X 5
+    text = re.sub(
+        r"(\d)\s*X\s*(\d)",
+        r"\1 X \2",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    # 12/1 -> 12 / 1
+    text = re.sub(
+        r"(\d)\s*/\s*(\d)",
+        r"\1 / \2",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    return re.sub(
+        r"\s+",
+        " ",
+        text
+    ).strip()
+
+
 def extract_valvoline_pack_quantity(description):
     """
-    Извлича броя единични опаковки в един case.
-
-    Поддържа масла, греси, течности и други продукти.
+    Връща броя единични опаковки в един case.
 
     Примери:
     4x4 L       -> 4
     4/4 L       -> 4
     4x5 L       -> 4
     12x1 L      -> 12
+    12/1 L      -> 12
     12x500 ML   -> 12
     24x400 G    -> 24
-    24/400 G    -> 24
     12x1 KG     -> 12
-    6x2 KG      -> 6
+
+    ВАЖНО:
+    Ако няма разпозната разфасовка, връща None,
+    а не 1. Така грешният ред не минава тихо.
     """
 
-    if description is None:
-        return 1
-
-    text = " ".join(
-        str(description)
-        .upper()
-        .strip()
-        .split()
+    text = normalize_valvoline_packaging_text(
+        description
     )
 
-    # Разпознава:
-    # 24x400 G
-    # 24/400 G
-    # 12x500 ML
-    # 12/1 KG
-    # 4x5 L
-    #
-    # Връща първото число, тоест броя опаковки
-    # в кашона.
+    if not text:
+        return None
+
+    unit_pattern = (
+        r"(?:ML|CL|DL|LTR|LT|L|KG|GR|GRAM|GRAMS|G)"
+    )
+
     match = re.search(
         r"\b"
         r"(\d{1,4})"
-        r"\s*"
-        r"(?:X|Х|×|/)"
-        r"\s*"
+        r"\s*(?:X|/)\s*"
         r"\d+(?:[.,]\d+)?"
         r"\s*"
-        r"(?:G|GR|GRAM|GRAMS|KG|ML|CL|DL|L|LT|LTR)"
-        r"\b",
+        + unit_pattern
+        + r"\b",
         text,
         re.IGNORECASE
     )
 
     if not match:
-        return 1
+        return None
 
     try:
         pack_quantity = int(
             match.group(1)
         )
-    except Exception:
-        return 1
+    except (TypeError, ValueError):
+        return None
 
     if pack_quantity <= 0:
-        return 1
+        return None
+
+    # Защита срещу абсурдно прихващане от PDF.
+    if pack_quantity > 1000:
+        return None
 
     return pack_quantity
 
 
 def extract_valvoline_litre_size(description):
     """
-    Извлича литрите на единичната разфасовка.
+    Връща литрите на една физическа опаковка.
 
     Примери:
     PL 20 L       -> 20
-    EEE 20 L      -> 20
-    208 L         -> 208
+    KE 60 L       -> 60
+    DR 208 L      -> 208
     4x5 L         -> 5
     4/4 L         -> 4
-    4/5 L         -> 5
+    12x1 L        -> 1
+
+    При липса на разфасовка връща None.
     """
 
-    if description is None:
-        return 1.0
+    text = normalize_valvoline_packaging_text(
+        description
+    )
 
-    text = str(description).upper().strip()
+    if not text:
+        return None
 
-    # Първо проверяваме комбинирана разфасовка.
-    # 4x5 L / 4/5 L -> единичната опаковка е 5 L
+    # Първо търсим case формат:
+    # 4 X 5 L -> единичната опаковка е 5 L.
     case_match = re.search(
-        r"\b\d{1,4}\s*(?:[XХ×]|/)\s*"
-        r"(\d+(?:[.,]\d+)?)\s*L\b",
+        r"\b"
+        r"\d{1,4}"
+        r"\s*(?:X|/)\s*"
+        r"(\d+(?:[.,]\d+)?)"
+        r"\s*(?:LTR|LT|L)\b",
         text,
         re.IGNORECASE
     )
@@ -1071,19 +1134,27 @@ def extract_valvoline_litre_size(description):
     if case_match:
         try:
             litre_size = float(
-                case_match.group(1).replace(",", ".")
+                case_match.group(1)
+                .replace(",", ".")
             )
+        except (TypeError, ValueError):
+            litre_size = None
 
-            if litre_size > 0:
-                return litre_size
+        if (
+            litre_size is not None
+            and
+            litre_size > 0
+            and
+            litre_size <= 10000
+        ):
+            return litre_size
 
-        except Exception:
-            pass
-
-    # Стандартна единична разфасовка.
-    # Например 20 L или 208 L.
+    # След това търсим стандартни разфасовки:
+    # 20 L, 60 L, 208 L.
     litre_matches = re.findall(
-        r"\b(\d+(?:[.,]\d+)?)\s*L\b",
+        r"\b"
+        r"(\d+(?:[.,]\d+)?)"
+        r"\s*(?:LTR|LT|L)\b",
         text,
         re.IGNORECASE
     )
@@ -1091,17 +1162,33 @@ def extract_valvoline_litre_size(description):
     if not litre_matches:
         return None
 
-    try:
-        litre_size = float(
-            litre_matches[-1].replace(",", ".")
-        )
-    except Exception:
+    valid_sizes = []
+
+    for raw_value in litre_matches:
+
+        try:
+            parsed_value = float(
+                raw_value.replace(",", ".")
+            )
+        except (TypeError, ValueError):
+            continue
+
+        if (
+            parsed_value > 0
+            and
+            parsed_value <= 10000
+        ):
+            valid_sizes.append(
+                parsed_value
+            )
+
+    if not valid_sizes:
         return None
 
-    if litre_size <= 0:
-        return None
-
-    return litre_size
+    # Във Valvoline Description разфасовката често
+    # се повтаря, например "... PL 20 L 20 L".
+    # Последният валиден размер е правилната разфасовка.
+    return valid_sizes[-1]
     
 # ======================================================
 # MOTUL PARSER
@@ -1560,36 +1647,47 @@ def extract_motul_rows(pdf_file):
         "pages": processed_pages,
         "rows": rows
     }
-    # ======================================================
+# ======================================================
 # VALVOLINE PARSER
 # ======================================================
 
 def extract_valvoline_rows(pdf_file):
     """
-    VALVOLINE parser.
+    VALVOLINE parser за VEN0002867.
 
-    Логика:
+    Поддържа:
 
-    UoM = Lit
-        invoice Qty / литри в една опаковка
+    1. Числов Cross Reference:
+       916497, 889726, 872802
 
-        Пример:
-        600 Lit / 20 L = 30 бр.
+    2. Буквено-цифров Cross Reference:
+       VE885
 
-    UoM = case
-        invoice Qty * бройки в case
+    3. Повтарящи се позиции:
+       един Cross Reference може да присъства повече
+       от веднъж и всеки фактурен ред се запазва.
 
-        Пример:
-        73 case * 4 = 292 бр.
+    4. UoM = Lit:
+       Qty / литри в една физическа опаковка.
 
-    Крайна цена:
-        Amount EUR / крайното количество
+       600 Lit / 20 L = 30 бр.
+       208 Lit / 208 L = 1 бр.
+       120 Lit / 60 L = 2 бр.
+
+    5. UoM = case:
+       Qty * бройки в case.
+
+       73 case * 4 = 292 бр.
+       2 case * 12 = 24 бр.
+
+    6. Цена:
+       Amount EUR / крайното количество.
     """
 
     rows = []
+    warnings = []
     full_text = ""
     processed_pages = 0
-
     document_lines = []
 
     pdf_file.seek(0)
@@ -1631,16 +1729,14 @@ def extract_valvoline_rows(pdf_file):
     # PRODUCT START
     # ==================================================
     #
-    # Пример:
-    #
-    # 1 364606 916497 VAL RESTORE & PROTECT 5W40 PL 20 L ...
-    # 4 362689 914965 MAXLIFE 5W40 4/4 NSW EEE 4x4 L ...
+    # 1 364606 916497 VAL RESTORE...
+    # 36 337935 VE885 VAL AIR FILTER OIL...
     #
     # Групи:
     # 1 = позиция
-    # 2 = material number
+    # 2 = Mat.No.
     # 3 = Cross Reference
-    # 4 = останалата част
+    # 4 = Description и останалите данни
     # ==================================================
 
     item_pattern = re.compile(
@@ -1649,9 +1745,6 @@ def extract_valvoline_rows(pdf_file):
         r"\s+"
         r"(\d{5,10})"
         r"\s+"
-        # Cross Reference may be numeric (916497) or
-        # alphanumeric (VE885). It is read only from the
-        # column between Mat.No. and Item Description.
         r"([A-Z0-9][A-Z0-9\-./]{2,19})"
         r"\s+"
         r"(.+)$",
@@ -1666,15 +1759,62 @@ def extract_valvoline_rows(pdf_file):
 
         line = line_data["text"]
 
-        match = item_pattern.match(line)
+        match = item_pattern.match(
+            line
+        )
 
         if not match:
             continue
 
-        position_no = match.group(1).strip()
-        material_no = match.group(2).strip()
-        invoice_item = match.group(3).strip()
-        remaining_text = match.group(4).strip()
+        position_no = (
+            match.group(1).strip()
+        )
+
+        material_no = (
+            match.group(2).strip()
+        )
+
+        invoice_item = (
+            match.group(3)
+            .upper()
+            .strip()
+        )
+
+        remaining_text = (
+            match.group(4).strip()
+        )
+
+        # Cross Reference трябва да съдържа цифра.
+        # Това допуска 916497 и VE885, но отхвърля
+        # случайно прихванати служебни думи.
+        if not re.search(
+            r"\d",
+            invoice_item
+        ):
+            continue
+
+        remaining_upper = (
+            remaining_text.upper()
+        )
+
+        forbidden_texts = (
+            "INVOICE NO",
+            "INVOICE NUMBER",
+            "CUSTOMER PO",
+            "SHIPMENT DATE",
+            "PAYMENT TERMS",
+            "TOTAL EUR",
+            "TOTAL GROSS",
+            "TOTAL NET",
+            "BANK ACC",
+            "PAGE "
+        )
+
+        if any(
+            forbidden_text in remaining_upper
+            for forbidden_text in forbidden_texts
+        ):
+            continue
 
         item_starts.append({
             "line_index": line_index,
@@ -1685,22 +1825,27 @@ def extract_valvoline_rows(pdf_file):
             "remaining_text": remaining_text
         })
 
-    # ==================================================
-    # PROCESS PRODUCT BLOCKS
-    # ==================================================
-
+    # Не използваме set(), unique() или drop_duplicates().
+    # Всеки намерен старт е отделен фактурен ред.
     for item_index, item_data in enumerate(
         item_starts
     ):
 
-        block_start = item_data["line_index"]
+        block_start = (
+            item_data["line_index"]
+        )
 
         if item_index + 1 < len(item_starts):
+
             block_end = item_starts[
                 item_index + 1
             ]["line_index"]
+
         else:
-            block_end = len(document_lines)
+
+            block_end = len(
+                document_lines
+            )
 
         block_lines = document_lines[
             block_start:block_end
@@ -1717,13 +1862,24 @@ def extract_valvoline_rows(pdf_file):
             block_text
         ).strip()
 
-        position_no = item_data["position_no"]
-        material_no = item_data["material_no"]
-        invoice_item = item_data["invoice_item"]
-        page_number = item_data["page"]
+        position_no = (
+            item_data["position_no"]
+        )
 
-        # Премахваме първите три колони,
-        # за да останат Description + финансовите данни.
+        material_no = (
+            item_data["material_no"]
+        )
+
+        invoice_item = (
+            item_data["invoice_item"]
+        )
+
+        page_number = (
+            item_data["page"]
+        )
+
+        # Премахваме:
+        # position + Mat.No. + Cross Reference.
         prefix_pattern = re.compile(
             r"^\s*"
             + re.escape(position_no)
@@ -1741,16 +1897,14 @@ def extract_valvoline_rows(pdf_file):
             count=1
         )
 
+        product_text = re.sub(
+            r"\s+",
+            " ",
+            product_text
+        ).strip()
+
         # ==================================================
         # UOM + QTY + UNIT PRICE + GROSS VALUE
-        # ==================================================
-        #
-        # Lit 600.00 6.8500 4,110.00
-        # case 73.00 93.2800 6,809.44
-        #
-        # Първите четири стойности са достатъчни,
-        # защото Gross Value = Amount EUR в примерната
-        # фактура без отстъпка/VAT.
         # ==================================================
 
         data_match = re.search(
@@ -1767,6 +1921,17 @@ def extract_valvoline_rows(pdf_file):
         )
 
         if not data_match:
+
+            warnings.append({
+                "position_no": position_no,
+                "invoice_item": invoice_item,
+                "reason": (
+                    "Не са намерени UoM, Qty, "
+                    "Unit price и Amount."
+                ),
+                "source_line": block_text
+            })
+
             continue
 
         invoice_unit = (
@@ -1775,104 +1940,207 @@ def extract_valvoline_rows(pdf_file):
             .strip()
         )
 
-        invoice_quantity = parse_european_number(
-            data_match.group(2)
+        invoice_quantity = (
+            parse_european_number(
+                data_match.group(2)
+            )
         )
 
-        invoice_unit_price = parse_european_number(
-            data_match.group(3)
+        invoice_unit_price = (
+            parse_european_number(
+                data_match.group(3)
+            )
         )
 
-        line_total = parse_european_number(
-            data_match.group(4)
+        line_total = (
+            parse_european_number(
+                data_match.group(4)
+            )
         )
 
-        if invoice_quantity is None:
+        if (
+            invoice_quantity is None
+            or
+            invoice_quantity <= 0
+        ):
+
+            warnings.append({
+                "position_no": position_no,
+                "invoice_item": invoice_item,
+                "reason": "Невалидно фактурно количество.",
+                "source_line": block_text
+            })
+
             continue
 
-        if line_total is None:
-            continue
+        if (
+            line_total is None
+            or
+            line_total < 0
+        ):
 
-        if invoice_quantity <= 0:
-            continue
+            warnings.append({
+                "position_no": position_no,
+                "invoice_item": invoice_item,
+                "reason": "Невалиден Amount EUR.",
+                "source_line": block_text
+            })
 
-        if line_total < 0:
             continue
 
         # ==================================================
         # DESCRIPTION / PACKAGING TEXT
         # ==================================================
-        
-        # Всичко ПРЕДИ UoM (Lit / case) е описанието на артикула.
-        # Не търсим разфасовка във финансовите числа след UoM.
+
         description = product_text[
             :data_match.start()
         ].strip()
-        
+
         if not description:
-            description = item_data["remaining_text"]
-        
+            description = (
+                item_data["remaining_text"]
+            )
+
+        # Използваме основно Description, защото така
+        # финансовите стойности не могат да бъдат
+        # разпознати погрешно като литри.
         packaging_search_text = description
-        
-        
+
+        # Ако в Description няма нито една мерна единица,
+        # правим ограничен fallback към целия блок.
+        if not re.search(
+            r"\b(?:ML|CL|DL|LTR|LT|L|KG|GR|G)\b",
+            normalize_valvoline_packaging_text(
+                packaging_search_text
+            ),
+            re.IGNORECASE
+        ):
+            packaging_search_text = product_text
+
         # ==================================================
         # QUANTITY CONVERSION
         # ==================================================
-        
-        final_quantity = invoice_quantity
-        pack_quantity = 1
+
+        final_quantity = None
+        pack_quantity = None
         pack_size = None
-        
-        
+        conversion_error = ""
+
         # ----------------------------------------------
         # LIT
-        #
-        # 600 Lit / 20 L = 30 броя
-        # 208 Lit / 208 L = 1 брой
-        # 120 Lit / 60 L = 2 броя
         # ----------------------------------------------
-        
+
         if invoice_unit == "LIT":
-        
-            pack_size = extract_valvoline_litre_size(
-                packaging_search_text
+
+            pack_size = (
+                extract_valvoline_litre_size(
+                    packaging_search_text
+                )
             )
-        
-            if pack_size is None or pack_size <= 0:
-                # Не допускаме Lit позиция да мине тихо 1:1,
-                # ако разфасовката не е разпозната.
-                continue
-        
-            final_quantity = (
-                invoice_quantity
-                / pack_size
-            )
-        
-        
+
+            if pack_size is None:
+
+                conversion_error = (
+                    "LIT: не е намерена разфасовка "
+                    "в литри."
+                )
+
+            else:
+
+                final_quantity = (
+                    invoice_quantity
+                    / pack_size
+                )
+
         # ----------------------------------------------
         # CASE
-        #
-        # 73 case * 4 = 292 броя
-        # 72 case * 4 = 288 броя
-        # 1 case * 12 = 12 броя
         # ----------------------------------------------
-        
+
         elif invoice_unit == "CASE":
-        
-            pack_quantity = extract_valvoline_pack_quantity(
-                packaging_search_text
+
+            pack_quantity = (
+                extract_valvoline_pack_quantity(
+                    packaging_search_text
+                )
             )
-        
-            if pack_quantity > 0:
-        
+
+            if pack_quantity is None:
+
+                conversion_error = (
+                    "CASE: не е намерен брой "
+                    "опаковки в кашона."
+                )
+
+            else:
+
                 final_quantity = (
                     invoice_quantity
                     * pack_quantity
                 )
-        
-        
-        if final_quantity <= 0:
+
+        else:
+
+            conversion_error = (
+                f"Неподдържан UoM: {invoice_unit}"
+            )
+
+        if conversion_error:
+
+            warnings.append({
+                "position_no": position_no,
+                "invoice_item": invoice_item,
+                "reason": conversion_error,
+                "source_line": block_text
+            })
+
+            # Не допускаме рисков ред да премине 1:1.
             continue
+
+        if (
+            final_quantity is None
+            or
+            final_quantity <= 0
+        ):
+
+            warnings.append({
+                "position_no": position_no,
+                "invoice_item": invoice_item,
+                "reason": (
+                    "Получено е невалидно крайно "
+                    "количество."
+                ),
+                "source_line": block_text
+            })
+
+            continue
+
+        # PRN използва цели физически бройки.
+        rounded_quantity = round(
+            final_quantity
+        )
+
+        quantity_difference = abs(
+            final_quantity
+            - rounded_quantity
+        )
+
+        if quantity_difference > 0.000001:
+
+            warnings.append({
+                "position_no": position_no,
+                "invoice_item": invoice_item,
+                "reason": (
+                    "Крайното количество не е цяло "
+                    f"число: {final_quantity}"
+                ),
+                "source_line": block_text
+            })
+
+            continue
+
+        final_quantity = int(
+            rounded_quantity
+        )
 
         # ==================================================
         # PRICE PER FINAL PIECE
@@ -1910,23 +2178,7 @@ def extract_valvoline_rows(pdf_file):
             <= tolerance
         )
 
-        # Ако резултатът практически е цяло число,
-        # записваме го като такова.
-        rounded_quantity = round(
-            final_quantity
-        )
-
-        if abs(
-            final_quantity
-            - rounded_quantity
-        ) < 0.000001:
-
-            final_quantity = int(
-                rounded_quantity
-            )
-
         rows.append({
-
             "invoice_item":
                 invoice_item,
 
@@ -1968,6 +2220,9 @@ def extract_valvoline_rows(pdf_file):
             "line_total":
                 line_total,
 
+            "calculated_total":
+                calculated_total,
+
             "calculation_ok":
                 calculation_ok,
 
@@ -1978,9 +2233,25 @@ def extract_valvoline_rows(pdf_file):
                 block_text
         })
 
-    invoice_number = extract_invoice_number(
-        full_text,
-        pdf_file.name
+    invoice_number = (
+        extract_invoice_number(
+            full_text,
+            pdf_file.name
+        )
+    )
+
+    extracted_total = round(
+        sum(
+            float(
+                row.get(
+                    "line_total",
+                    0
+                )
+                or 0
+            )
+            for row in rows
+        ),
+        2
     )
 
     return {
@@ -1991,7 +2262,19 @@ def extract_valvoline_rows(pdf_file):
             processed_pages,
 
         "rows":
-            rows
+            rows,
+
+        "warnings":
+            warnings,
+
+        "detected_positions":
+            len(item_starts),
+
+        "extracted_positions":
+            len(rows),
+
+        "extracted_total":
+            extracted_total
     }
 
 # ======================================================
