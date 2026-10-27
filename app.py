@@ -1802,11 +1802,9 @@ def extract_valvoline_rows(pdf_file):
         # ==================================================
         # DESCRIPTION / PACKAGING TEXT
         # ==================================================
-        # При някои Valvoline PDF-и разфасовката е визуално
-        # на следващ ред и pdfplumber може да я постави след
-        # финансовите данни. Затова пазим целия продуктов блок
-        # за търсене на 20 L, 60 L, 208 L, 4x5 L и т.н.
         
+        # Всичко ПРЕДИ UoM (Lit / case) е описанието на артикула.
+        # Не търсим разфасовка във финансовите числа след UoM.
         description = product_text[
             :data_match.start()
         ].strip()
@@ -1814,10 +1812,7 @@ def extract_valvoline_rows(pdf_file):
         if not description:
             description = item_data["remaining_text"]
         
-        # ВАЖНО:
-        # За разфасовката търсим в целия продуктов блок,
-        # защото "20 L" може да е попаднало след финансовия ред.
-        packaging_search_text = product_text
+        packaging_search_text = description
         
         
         # ==================================================
