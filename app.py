@@ -1620,9 +1620,13 @@ def extract_valvoline_rows(pdf_file):
         r"\s+"
         r"(\d{5,10})"
         r"\s+"
-        r"(\d{5,10})"
+        # Cross Reference may be numeric (916497) or
+        # alphanumeric (VE885). It is read only from the
+        # column between Mat.No. and Item Description.
+        r"([A-Z0-9][A-Z0-9\-./]{2,19})"
         r"\s+"
-        r"(.+)$"
+        r"(.+)$",
+        re.IGNORECASE
     )
 
     item_starts = []
@@ -3651,20 +3655,12 @@ if page == "📄 PDF → Excel":
             ignore_index=True
         )
 
-        final_result_df = (
-            final_result_df
-            .drop_duplicates(
-                subset=[
-                    "_file",
-                    "_invoice_item",
-                    "_container_no",
-                    "Qty",
-                    "Price 1 pc",
-                    "_page"
-                ]
-            )
-            .reset_index(drop=True)
-        )
+        # Do not remove invoice rows only because Cross Reference,
+        # quantity, price and page are identical. Valvoline invoices
+        # can legitimately contain the same Cross Reference on more
+        # than one separate position (for example 889726).
+        # The parser already creates one row per invoice position.
+        final_result_df = final_result_df.reset_index(drop=True)
 
         direct_count = int(
             (
