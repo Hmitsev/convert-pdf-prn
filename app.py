@@ -1037,21 +1037,19 @@ def normalize_valvoline_packaging_text(value):
 
 def extract_valvoline_pack_quantity(description):
     """
-    Връща броя единични опаковки в един case.
+    Извлича броя физически опаковки в един Valvoline case.
 
-    Примери:
+    Поддържа:
     4x4 L       -> 4
     4/4 L       -> 4
     4x5 L       -> 4
     12x1 L      -> 12
     12/1 L      -> 12
+    12/1 SW     -> 12
     12x500 ML   -> 12
     24x400 G    -> 24
-    12x1 KG     -> 12
 
-    ВАЖНО:
-    Ако няма разпозната разфасовка, връща None,
-    а не 1. Така грешният ред не минава тихо.
+    Ако няма валидна разфасовка, връща None.
     """
 
     text = normalize_valvoline_packaging_text(
@@ -1061,37 +1059,90 @@ def extract_valvoline_pack_quantity(description):
     if not text:
         return None
 
-    unit_pattern = (
-        r"(?:ML|CL|DL|LTR|LT|L|KG|GR|GRAM|GRAMS|G)"
-    )
+    # ==============================================
+    # 1. ТОЧЕН ФОРМАТ С МЕРНА ЕДИНИЦА
+    # ==============================================
+    # Примери:
+    # 12x1 L
+    # 4/5 L
+    # 24x400 G
+    # 12x500 ML
 
-    match = re.search(
+    exact_match = re.search(
         r"\b"
         r"(\d{1,4})"
         r"\s*(?:X|/)\s*"
         r"\d+(?:[.,]\d+)?"
         r"\s*"
-        + unit_pattern
-        + r"\b",
+        r"(?:ML|CL|DL|LTR|LT|L|KG|GR|GRAM|GRAMS|G)"
+        r"\b",
         text,
         re.IGNORECASE
     )
 
-    if not match:
+    if exact_match:
+
+        try:
+            pack_quantity = int(
+                exact_match.group(1)
+            )
+        except (TypeError, ValueError):
+            pack_quantity = None
+
+        if (
+            pack_quantity is not None
+            and
+            1 <= pack_quantity <= 1000
+        ):
+            return pack_quantity
+
+    # ==============================================
+    # 2. VALVOLINE FALLBACK БЕЗ МЕРНА ЕДИНИЦА
+    # ==============================================
+    # Някои PDF-и разделят:
+    #
+    # 12/1 SW
+    # 12x1 L
+    #
+    # или оставят в Description само:
+    #
+    # SYNPOWER ENV C1 5W30 12/1 SW
+    #
+    # В такъв случай 12/1 е достатъчно ясно:
+    # 12 физически опаковки в един case.
+
+    fallback_match = re.search(
+        r"\b"
+        r"(\d{1,3})"
+        r"\s*(?:X|/)\s*"
+        r"(\d+(?:[.,]\d+)?)"
+        r"\b",
+        text,
+        re.IGNORECASE
+    )
+
+    if not fallback_match:
         return None
 
     try:
         pack_quantity = int(
-            match.group(1)
+            fallback_match.group(1)
         )
+
+        single_pack_size = float(
+            fallback_match.group(2)
+            .replace(",", ".")
+        )
+
     except (TypeError, ValueError):
         return None
 
-    if pack_quantity <= 0:
+    if not (
+        1 <= pack_quantity <= 1000
+    ):
         return None
 
-    # Защита срещу абсурдно прихващане от PDF.
-    if pack_quantity > 1000:
+    if single_pack_size <= 0:
         return None
 
     return pack_quantity
