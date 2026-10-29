@@ -4545,7 +4545,7 @@ if page == "📄 PDF → Excel":
             use_container_width=True,
             hide_index=True
         )
-        if selected_vendor_no == "VEN0001554"":
+        if selected_vendor_no == "VEN0001554":
 
             with st.expander(
                 "🔎 Motul изчисления"
