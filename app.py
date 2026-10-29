@@ -4312,7 +4312,18 @@ if page == "📄 PDF → Excel":
                     matched_df["_file"] = (
                         pdf_file.name
                     )
-
+                
+                    matched_df["_invoice_number"] = (
+                        extracted["invoice_number"]
+                    )
+                
+                    matched_df["_warehouse"] = (
+                        extracted.get(
+                            "warehouse",
+                            ""
+                        )
+                    )
+                
                     all_results.append(
                         matched_df
                     )
@@ -4569,98 +4580,288 @@ if page == "📄 PDF → Excel":
             )
         
         
-        # ==================================================
-        # STANDARD SINGLE PRN
-        # ==================================================
-        
-        with prn_col:
-        
-            if st.button(
-                "🧾 Зареди общо за PRN",
-                use_container_width=True,
-                key="load_current_invoice_to_prn"
-            ):
-        
-                direct_prn_df = (
-                    prepare_direct_prn_dataframe(
-                        final_result_df
-                    )
+            # ==================================================
+            # PRN BY INVOICE
+            # ==================================================
+            
+            with prn_col:
+            
+                unique_invoices = (
+                    final_result_df[
+                        "_invoice_number"
+                    ]
+                    .fillna("")
+                    .astype(str)
+                    .str.strip()
+                    .replace("", "Без номер")
+                    .unique()
+                    .tolist()
                 )
-        
-                if direct_prn_df.empty:
-        
-                    st.error(
-                        "Няма валидни редове "
-                        "за зареждане в PRN."
-                    )
-        
+            
+                if len(unique_invoices) == 1:
+            
+                    # ==========================================
+                    # ЕДНА ФАКТУРА
+                    # ==========================================
+            
+                    if st.button(
+                        "🧾 Зареди за PRN",
+                        use_container_width=True,
+                        key="load_single_invoice_to_prn"
+                    ):
+            
+                        direct_prn_df = (
+                            prepare_direct_prn_dataframe(
+                                final_result_df
+                            )
+                        )
+            
+                        if direct_prn_df.empty:
+            
+                            st.error(
+                                "Няма валидни редове "
+                                "за зареждане в PRN."
+                            )
+            
+                        else:
+            
+                            invoice_no = (
+                                unique_invoices[0]
+                            )
+            
+                            st.session_state[
+                                "direct_prn_df"
+                            ] = direct_prn_df.copy()
+            
+                            st.session_state[
+                                "direct_prn_name"
+                            ] = invoice_no
+            
+                            st.session_state[
+                                "container_prn_data"
+                            ] = {}
+            
+                            st.session_state[
+                                "container_prn_loaded"
+                            ] = False
+            
+                            st.session_state[
+                                "converter_page"
+                            ] = PAGE_PRN
+            
+                            st.session_state[
+                                "prn_loaded"
+                            ] = True
+            
+                            st.session_state.pop(
+                                "converter_menu",
+                                None
+                            )
+            
+                            st.rerun()
+            
                 else:
+            
+                    st.info(
+                        f"📚 Заредени са "
+                        f"{len(unique_invoices)} фактури. "
+                        f"Избери фактура за PRN."
+                    )
+    # ==================================================
+    # MULTIPLE INVOICES - SEPARATE PRN
+    # ==================================================
+    
+    if (
+        "_invoice_number"
+        in final_result_df.columns
+    ):
+    
+        invoice_list = (
+            final_result_df[
+                "_invoice_number"
+            ]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .replace("", "Без номер")
+            .unique()
+            .tolist()
+        )
+    
+        if len(invoice_list) > 1:
+    
+            st.markdown("---")
+    
+            st.subheader(
+                "🧾 PRN по отделни фактури"
+            )
+    
+            for invoice_no in invoice_list:
+    
+                invoice_df = (
+                    final_result_df[
+                        final_result_df[
+                            "_invoice_number"
+                        ]
+                        .fillna("")
+                        .astype(str)
+                        .str.strip()
+                        == invoice_no
+                    ]
+                    .copy()
+                )
+    
+                if invoice_df.empty:
+                    continue
+    
+                invoice_qty = (
+                    pd.to_numeric(
+                        invoice_df["Qty"],
+                        errors="coerce"
+                    )
+                    .fillna(0)
+                    .sum()
+                )
+    
+                # ======================================
+                # MOTUL WAREHOUSE
+                # ======================================
+    
+                warehouse = ""
+    
+                if "_warehouse" in invoice_df.columns:
+    
+                    warehouses = (
+                        invoice_df["_warehouse"]
+                        .fillna("")
+                        .astype(str)
+                        .str.strip()
+                    )
+    
+                    warehouses = [
+                        value
+                        for value in warehouses.unique()
+                        if value
+                    ]
+    
+                    if warehouses:
+    
+                        warehouse = warehouses[0]
+    
+                # ======================================
+                # HEADER
+                # ======================================
+    
+                if warehouse:
+    
+                    invoice_title = (
+                        f"📄 {invoice_no} | "
+                        f"🏭 {warehouse} | "
+                        f"Позиции: {len(invoice_df)} | "
+                        f"Количество: "
+                        f"{int(round(invoice_qty))}"
+                    )
+    
+                else:
+    
+                    invoice_title = (
+                        f"📄 {invoice_no} | "
+                        f"Позиции: {len(invoice_df)} | "
+                        f"Количество: "
+                        f"{int(round(invoice_qty))}"
+                    )
+    
+                with st.expander(
+                    invoice_title,
+                    expanded=True
+                ):
+    
+                    invoice_preview = invoice_df[
+                        [
+                            "Item No.",
+                            "Cross-Reference No.",
+                            "Qty",
+                            "Price 1 pc"
+                        ]
+                    ].copy()
+    
+                    st.dataframe(
+                        invoice_preview,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+    
+                    safe_invoice_key = re.sub(
+                        r"[^A-Z0-9_\-]",
+                        "_",
+                        str(invoice_no),
+                        flags=re.IGNORECASE
+                    )
+    
+                    if st.button(
+                        f"🧾 Зареди {invoice_no} за PRN",
+                        use_container_width=True,
+                        key=(
+                            f"load_invoice_prn_"
+                            f"{safe_invoice_key}"
+                        )
+                    ):
+    
+                        direct_prn_df = (
+                            prepare_direct_prn_dataframe(
+                                invoice_df
+                            )
+                        )
+    
+                        if direct_prn_df.empty:
+    
+                            st.error(
+                                "Няма валидни редове "
+                                "за тази фактура."
+                            )
+    
+                        else:
+    
+                            st.session_state[
+                                "direct_prn_df"
+                            ] = (
+                                direct_prn_df.copy()
+                            )
+    
+                            # Името на PRN ще бъде
+                            # номерът на конкретната фактура.
+                            st.session_state[
+                                "direct_prn_name"
+                            ] = str(
+                                invoice_no
+                            )
+    
+                            # Изчистваме container режима.
+                            st.session_state[
+                                "container_prn_data"
+                            ] = {}
+    
+                            st.session_state[
+                                "container_prn_loaded"
+                            ] = False
+    
+                            st.session_state[
+                                "prn_loaded"
+                            ] = True
+    
+                            st.session_state[
+                                "converter_page"
+                            ] = PAGE_PRN
+    
+                            st.session_state.pop(
+                                "converter_menu",
+                                None
+                            )
+    
+                            st.rerun()
+                            
         
-                    st.session_state[
-                        "direct_prn_df"
-                    ] = direct_prn_df.copy()
-        
-                    # Име на PRN файла
-                    if len(invoice_numbers) == 1:
-                    
-                        prn_name = str(
-                            invoice_numbers[0]
-                        ).strip()
-                    
-                        # Само за Motul добавяме склада към името.
-                        if (
-                            selected_vendor_no == "VEN0001554"
-                            and
-                            motul_warehouses
-                        ):
-                    
-                            warehouse_name = str(
-                                motul_warehouses[0].get(
-                                    "warehouse",
-                                    ""
-                                )
-                            ).strip().upper()
-                    
-                            if warehouse_name in {
-                                "B01",
-                                "B02"
-                            }:
-                                prn_name = (
-                                    f"{prn_name} "
-                                    f"({warehouse_name})"
-                                )
-                    
-                        st.session_state[
-                            "direct_prn_name"
-                        ] = prn_name
-                    
-                    else:
-                    
-                        st.session_state[
-                            "direct_prn_name"
-                        ] = "multiple_invoices"
-        
-                    # Изчистваме контейнерния режим.
-                    st.session_state[
-                        "container_prn_data"
-                    ] = {}
-        
-                    st.session_state[
-                        "container_prn_loaded"
-                    ] = False
-        
-                    st.session_state[
-                        "converter_page"
-                    ] = PAGE_PRN
-        
-                    st.session_state[
-                        "prn_loaded"
-                    ] = True
-        
-                    st.rerun()
-        
-        
-                # ==================================================
+        # ==================================================
         # CONTAINER PRN
         # ==================================================
 
