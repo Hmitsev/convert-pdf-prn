@@ -4600,13 +4600,45 @@ if page == "📄 PDF → Excel":
                         "direct_prn_df"
                     ] = direct_prn_df.copy()
         
-                    st.session_state[
-                        "direct_prn_name"
-                    ] = (
-                        str(invoice_numbers[0])
-                        if len(invoice_numbers) == 1
-                        else "multiple_invoices"
-                    )
+                    # Име на PRN файла
+                    if len(invoice_numbers) == 1:
+                    
+                        prn_name = str(
+                            invoice_numbers[0]
+                        ).strip()
+                    
+                        # Само за Motul добавяме склада към името.
+                        if (
+                            selected_vendor_no == "VEN0001554"
+                            and
+                            motul_warehouses
+                        ):
+                    
+                            warehouse_name = str(
+                                motul_warehouses[0].get(
+                                    "warehouse",
+                                    ""
+                                )
+                            ).strip().upper()
+                    
+                            if warehouse_name in {
+                                "B01",
+                                "B02"
+                            }:
+                                prn_name = (
+                                    f"{prn_name} "
+                                    f"({warehouse_name})"
+                                )
+                    
+                        st.session_state[
+                            "direct_prn_name"
+                        ] = prn_name
+                    
+                    else:
+                    
+                        st.session_state[
+                            "direct_prn_name"
+                        ] = "multiple_invoices"
         
                     # Изчистваме контейнерния режим.
                     st.session_state[
