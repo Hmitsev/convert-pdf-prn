@@ -172,17 +172,34 @@ st.markdown(
     }
 
     /* Sidebar arrows - vertical center */
-    button[data-testid="stSidebarCollapseButton"],
-    button[data-testid="stSidebarExpandButton"] {
-        position: fixed !important;
-        top: 50% !important;
-        transform: translateY(-50%) !important;
-        z-index: 999999 !important;
-    }
+    /* Sidebar collapse / expand button - vertical center */
 
-    button[data-testid="stSidebarExpandButton"] {
-        left: 12px !important;
-    }
+/* Контейнерът на бутона при отворен sidebar */
+section[data-testid="stSidebar"] div[data-testid="stSidebarHeader"] {
+    position: absolute !important;
+    top: 50% !important;
+    right: 0 !important;
+    transform: translateY(-50%) !important;
+    z-index: 999999 !important;
+}
+
+/* Самият бутон */
+section[data-testid="stSidebar"]
+button[kind="header"] {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    margin: 0 !important;
+}
+
+/* Бутонът при затворен sidebar */
+div[data-testid="stSidebarCollapsedControl"] {
+    position: fixed !important;
+    top: 50% !important;
+    left: 10px !important;
+    transform: translateY(-50%) !important;
+    z-index: 999999 !important;
+}
 
     </style>
     """,
