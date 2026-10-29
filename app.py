@@ -1873,6 +1873,27 @@ def extract_motul_rows(pdf_file):
     )
     
     return {
+        "invoice_number":
+            invoice_number,
+    
+        "pages":
+            processed_pages,
+    
+        "rows":
+            rows,
+    
+        "warehouse":
+            warehouse_info["warehouse"],
+    
+        "warehouse_source":
+            warehouse_info["source"],
+    
+        "warehouse_ref_no":
+            warehouse_info["ref_no"],
+    
+        "warehouse_address":
+            warehouse_info["address_match"]
+    }
         "invoice_number": invoice_number,
         "pages": processed_pages,
         "rows": rows,
