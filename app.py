@@ -4248,6 +4248,40 @@ if page == "📄 PDF → Excel":
                     extracted = extract_federal_rows(
                         pdf_file
                     )
+# ==========================================
+# MOTUL WAREHOUSE RESULT
+# ==========================================
+
+if selected_vendor_no == "VEN0001554":
+
+    motul_warehouses.append({
+        "warehouse":
+            extracted.get(
+                "warehouse",
+                "Неопределен"
+            ),
+
+        "source":
+            extracted.get(
+                "warehouse_source",
+                ""
+            ),
+
+        "ref_no":
+            extracted.get(
+                "warehouse_ref_no",
+                ""
+            ),
+
+        "address":
+            extracted.get(
+                "warehouse_address",
+                ""
+            ),
+
+        "file":
+            pdf_file.name
+    })
 
                 invoice_numbers.append(
                     extracted[
