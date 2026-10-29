@@ -1289,16 +1289,6 @@ def extract_valvoline_litre_size(description):
 # ======================================================
 
 def detect_motul_warehouse(full_text):
-    """
-    Определя склада за MOTUL.
-
-    Приоритет:
-    1. Ref.-No. съдържа B01/B02 -> използваме него.
-    2. Ако няма надежден Ref.-No.:
-       Industrialna str. 7 -> B01
-       Industrialna str. 8 -> B02
-    3. Ако нищо не е намерено -> Неопределен.
-    """
 
     if not full_text:
         return {
@@ -1308,30 +1298,16 @@ def detect_motul_warehouse(full_text):
             "address_match": ""
         }
 
-    text = str(full_text)
-
-    # Нормализиран вариант само за търсенето.
     search_text = (
-        text
+        str(full_text)
         .upper()
         .replace("В01", "B01")
         .replace("В02", "B02")
     )
 
     # ==================================================
-    # 1. REF.-NO. ИМА ПРИОРИТЕТ
+    # 1. REF.-NO. - ВИНАГИ С ПРИОРИТЕТ
     # ==================================================
-    #
-    # Примери:
-    # Ref.-No.: B02_20260903_1
-    # Ref.-No.: B01_20261006_1
-    #
-    # Позволяваме:
-    # Ref.-No.
-    # Ref No
-    # Ref.No.
-    # Ref - No
-    #
 
     ref_match = re.search(
         r"REF\s*[\.\-]?\s*NO\.?\s*[:\-]?\s*"
@@ -1339,6 +1315,8 @@ def detect_motul_warehouse(full_text):
         search_text,
         re.IGNORECASE
     )
+
+    ref_no = ""
 
     if ref_match:
 
@@ -1348,12 +1326,11 @@ def detect_motul_warehouse(full_text):
             .upper()
         )
 
-        # B01 може да бъде в началото или
-        # вътре в референтния номер.
         if re.search(
             r"(?<![A-Z0-9])B01(?![A-Z0-9])",
             ref_no
-        ):
+        ) or ref_no.startswith("B01"):
+
             return {
                 "warehouse": "B01",
                 "source": "Ref.-No.",
@@ -1364,7 +1341,8 @@ def detect_motul_warehouse(full_text):
         if re.search(
             r"(?<![A-Z0-9])B02(?![A-Z0-9])",
             ref_no
-        ):
+        ) or ref_no.startswith("B02"):
+
             return {
                 "warehouse": "B02",
                 "source": "Ref.-No.",
@@ -1372,56 +1350,41 @@ def detect_motul_warehouse(full_text):
                 "address_match": ""
             }
 
-        # Допълнителна защита за формати като:
-        # B01_...
-        # B02_...
-        if ref_no.startswith("B01"):
-            return {
-                "warehouse": "B01",
-                "source": "Ref.-No.",
-                "ref_no": ref_no,
-                "address_match": ""
-            }
-
-        if ref_no.startswith("B02"):
-            return {
-                "warehouse": "B02",
-                "source": "Ref.-No.",
-                "ref_no": ref_no,
-                "address_match": ""
-            }
-
-    else:
-
-        ref_no = ""
-
     # ==================================================
-    # 2. FALLBACK КЪМ INVOICE / CONSIGNEE АДРЕСА
+    # 2. FALLBACK - CONSIGNEE / INVOICE ADDRESS
     # ==================================================
 
-    # Поддържаме варианти:
-    #
-    # Industrialna str. 7
-    # Industrialna str 7
-    # Industrialna str. 7, building 4
-    #
-    # Не използваме Company адреса като отделна логика.
-    # Търсим текста на фактурата, но използваме само
-    # конкретния маркер Industrialna str.
+    consignee_text = ""
+
+    consignee_match = re.search(
+        r"CONSIGNEE\s*:?.{0,500}",
+        search_text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if consignee_match:
+        consignee_text = consignee_match.group(0)
+
+    # Ако pdfplumber не е запазил Consignee блока
+    # достатъчно добре, ограничен fallback към header-а.
+    address_search_text = (
+        consignee_text
+        if consignee_text
+        else search_text[:2500]
+    )
 
     address_b01 = re.search(
-        r"INDUSTRIALNA\s+STR\.?\s*[:\-]?\s*7\b",
-        search_text,
+        r"INDUSTRIALNA\s+STR\.?\s*7\b",
+        address_search_text,
         re.IGNORECASE
     )
 
     address_b02 = re.search(
-        r"INDUSTRIALNA\s+STR\.?\s*[:\-]?\s*8\b",
-        search_text,
+        r"INDUSTRIALNA\s+STR\.?\s*8\b",
+        address_search_text,
         re.IGNORECASE
     )
 
-    # Ако е намерен само адрес 7.
     if address_b01 and not address_b02:
 
         return {
@@ -1431,7 +1394,6 @@ def detect_motul_warehouse(full_text):
             "address_match": "Industrialna str. 7"
         }
 
-    # Ако е намерен само адрес 8.
     if address_b02 and not address_b01:
 
         return {
@@ -1441,8 +1403,58 @@ def detect_motul_warehouse(full_text):
             "address_match": "Industrialna str. 8"
         }
 
-    # Ако по някаква причина PDF съдържа и двата адреса,
-    # не гадаем.
+    if address_b01 and address_b02:
+
+        return {
+            "warehouse": "Неопределен",
+            "source": "Конфликт в адреса",
+            "ref_no": ref_no,
+            "address_match":
+                "Industrialna str. 7 + Industrialna str. 8"
+        }
+
+    return {
+        "warehouse": "Неопределен",
+        "source": "Не е намерен склад",
+        "ref_no": ref_no,
+        "address_match": ""
+    }
+    # ==============================================
+    # 2. FALLBACK КЪМ АДРЕСА
+    # ==============================================
+
+    address_b01 = re.search(
+        r"INDUSTRIALNA\s+STR\.?\s*7\b",
+        search_text,
+        re.IGNORECASE
+    )
+
+    address_b02 = re.search(
+        r"INDUSTRIALNA\s+STR\.?\s*8\b",
+        search_text,
+        re.IGNORECASE
+    )
+
+    if address_b01 and not address_b02:
+
+        return {
+            "warehouse": "B01",
+            "source": "Адрес",
+            "ref_no": ref_no,
+            "address_match": "Industrialna str. 7"
+        }
+
+    if address_b02 and not address_b01:
+
+        return {
+            "warehouse": "B02",
+            "source": "Адрес",
+            "ref_no": ref_no,
+            "address_match": "Industrialna str. 8"
+        }
+
+    # Ако по някаква причина са намерени
+    # едновременно и двата адреса, не гадаем.
     if address_b01 and address_b02:
 
         return {
@@ -4533,7 +4545,7 @@ if page == "📄 PDF → Excel":
             use_container_width=True,
             hide_index=True
         )
-        if selected_vendor_no == "ТУК_ПОСТАВИ_VENDOR_NO_НА_MOTUL":
+        if selected_vendor_no == "VEN0001554"":
 
             with st.expander(
                 "🔎 Motul изчисления"
