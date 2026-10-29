@@ -1305,9 +1305,9 @@ def detect_motul_warehouse(full_text):
         .replace("В02", "B02")
     )
 
-    # ==================================================
+    # ==============================================
     # 1. REF.-NO. - ВИНАГИ С ПРИОРИТЕТ
-    # ==================================================
+    # ==============================================
 
     ref_match = re.search(
         r"REF\s*[\.\-]?\s*NO\.?\s*[:\-]?\s*"
@@ -1326,10 +1326,7 @@ def detect_motul_warehouse(full_text):
             .upper()
         )
 
-        if re.search(
-            r"(?<![A-Z0-9])B01(?![A-Z0-9])",
-            ref_no
-        ) or ref_no.startswith("B01"):
+        if "B01" in ref_no:
 
             return {
                 "warehouse": "B01",
@@ -1338,10 +1335,7 @@ def detect_motul_warehouse(full_text):
                 "address_match": ""
             }
 
-        if re.search(
-            r"(?<![A-Z0-9])B02(?![A-Z0-9])",
-            ref_no
-        ) or ref_no.startswith("B02"):
+        if "B02" in ref_no:
 
             return {
                 "warehouse": "B02",
@@ -1350,9 +1344,9 @@ def detect_motul_warehouse(full_text):
                 "address_match": ""
             }
 
-    # ==================================================
+    # ==============================================
     # 2. FALLBACK - CONSIGNEE / INVOICE ADDRESS
-    # ==================================================
+    # ==============================================
 
     consignee_text = ""
 
@@ -1363,10 +1357,10 @@ def detect_motul_warehouse(full_text):
     )
 
     if consignee_match:
-        consignee_text = consignee_match.group(0)
+        consignee_text = (
+            consignee_match.group(0)
+        )
 
-    # Ако pdfplumber не е запазил Consignee блока
-    # достатъчно добре, ограничен fallback към header-а.
     address_search_text = (
         consignee_text
         if consignee_text
@@ -1409,58 +1403,6 @@ def detect_motul_warehouse(full_text):
             "warehouse": "Неопределен",
             "source": "Конфликт в адреса",
             "ref_no": ref_no,
-            "address_match":
-                "Industrialna str. 7 + Industrialna str. 8"
-        }
-
-    return {
-        "warehouse": "Неопределен",
-        "source": "Не е намерен склад",
-        "ref_no": ref_no,
-        "address_match": ""
-    }
-    # ==============================================
-    # 2. FALLBACK КЪМ АДРЕСА
-    # ==============================================
-
-    address_b01 = re.search(
-        r"INDUSTRIALNA\s+STR\.?\s*7\b",
-        search_text,
-        re.IGNORECASE
-    )
-
-    address_b02 = re.search(
-        r"INDUSTRIALNA\s+STR\.?\s*8\b",
-        search_text,
-        re.IGNORECASE
-    )
-
-    if address_b01 and not address_b02:
-
-        return {
-            "warehouse": "B01",
-            "source": "Адрес",
-            "ref_no": ref_no,
-            "address_match": "Industrialna str. 7"
-        }
-
-    if address_b02 and not address_b01:
-
-        return {
-            "warehouse": "B02",
-            "source": "Адрес",
-            "ref_no": ref_no,
-            "address_match": "Industrialna str. 8"
-        }
-
-    # Ако по някаква причина са намерени
-    # едновременно и двата адреса, не гадаем.
-    if address_b01 and address_b02:
-
-        return {
-            "warehouse": "Неопределен",
-            "source": "Конфликт в адреса",
-            "ref_no": ref_no,
             "address_match": (
                 "Industrialna str. 7 + "
                 "Industrialna str. 8"
@@ -1469,7 +1411,7 @@ def detect_motul_warehouse(full_text):
 
     return {
         "warehouse": "Неопределен",
-        "source": "Не е намерен Ref.-No. или адрес",
+        "source": "Не е намерен склад",
         "ref_no": ref_no,
         "address_match": ""
     }
@@ -4494,7 +4436,9 @@ if page == "📄 PDF → Excel":
                 "❗ Ненамерени",
                 not_found_count
             )
-            if col5 is not None:
+        
+        
+        if col5 is not None:
 
                 warehouses_found = sorted(
                     {
@@ -4516,6 +4460,50 @@ if page == "📄 PDF → Excel":
                         "🏭 Склад",
                         warehouse_display
                     )
+                    if (
+                        selected_vendor_no == "VEN0001554"
+                        and
+                        motul_warehouses
+                    ):
+                    
+                        for warehouse_info in motul_warehouses:
+                    
+                            warehouse = warehouse_info.get(
+                                "warehouse",
+                                "Неопределен"
+                            )
+                    
+                            source = warehouse_info.get(
+                                "source",
+                                ""
+                            )
+                    
+                            ref_no = warehouse_info.get(
+                                "ref_no",
+                                ""
+                            )
+                    
+                            if source == "Ref.-No." and ref_no:
+                    
+                                st.caption(
+                                    f"🏭 {warehouse} | "
+                                    f"определен по Ref.-No.: "
+                                    f"{ref_no}"
+                                )
+                    
+                            elif source == "Адрес":
+                    
+                                st.caption(
+                                    f"🏭 {warehouse} | "
+                                    f"определен по адреса"
+                                )
+                    
+                            else:
+                    
+                                st.caption(
+                                    "⚠️ Motul складът не може "
+                                    "да бъде определен автоматично."
+                                )
 
 
         st.info(
