@@ -167,8 +167,8 @@ st.markdown(
 
     section[data-testid="stSidebar"] > div {
         background: transparent !important;
-        backdrop-filter: blur(0.5px) !important;
-        -webkit-backdrop-filter: blur(0.5px) !important;
+        backdrop-filter: blur(1px) !important;
+        -webkit-backdrop-filter: blur(1px) !important;
     }
 
     /* Sidebar arrows - vertical center */
