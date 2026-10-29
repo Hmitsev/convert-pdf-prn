@@ -3539,6 +3539,29 @@ def match_invoice_rows(
 
             "_page":
                 invoice_row["page"],
+            "_invoice_qty":
+                invoice_row.get(
+                    "invoice_qty",
+                    quantity
+                ),
+            
+            "_invoice_unit":
+                invoice_row.get(
+                    "invoice_unit",
+                    ""
+                ),
+            
+            "_pack_qty":
+                invoice_row.get(
+                    "pack_qty",
+                    1
+                ),
+            
+            "_description":
+                invoice_row.get(
+                    "description",
+                    ""
+                ),
             "_container_no":
                 invoice_row.get(
                     "container_no",
