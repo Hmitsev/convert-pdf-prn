@@ -4594,20 +4594,61 @@ if page == "📄 PDF → Excel":
             "не е намерен в Cross Reference базата"
         )
 
+        # ==================================================
+        # FILE NAMES + MOTUL WAREHOUSE
+        # ==================================================
+
         if len(invoice_numbers) == 1:
 
-            invoice_number = (
+            invoice_number = str(
                 invoice_numbers[0]
-            )
+            ).strip()
 
+            # Име за Excel
             excel_file_name = (
                 f"{invoice_number}.xlsx"
             )
+
+            # Базово име за PRN
+            prn_invoice_name = (
+                f"Invoice {invoice_number}"
+            )
+
+            # ==============================================
+            # MOTUL - ДОБАВЯНЕ НА B01 / B02 КЪМ PRN ИМЕТО
+            # ==============================================
+
+            if (
+                selected_vendor_no == "VEN0001554"
+                and
+                motul_warehouses
+            ):
+
+                motul_warehouse = str(
+                    motul_warehouses[0].get(
+                        "warehouse",
+                        ""
+                    )
+                ).strip().upper()
+
+                if motul_warehouse in {
+                    "B01",
+                    "B02"
+                }:
+
+                    prn_invoice_name = (
+                        f"{prn_invoice_name} "
+                        f"({motul_warehouse})"
+                    )
 
         else:
 
             excel_file_name = (
                 "multiple_invoices.xlsx"
+            )
+
+            prn_invoice_name = (
+                "multiple_invoices"
             )
 
         excel_output = create_invoice_excel(
@@ -4639,7 +4680,7 @@ if page == "📄 PDF → Excel":
         
             download_col, prn_col = st.columns(2)
             container_col = None
-                    # ==================================================
+        # ==================================================
         # DOWNLOAD EXCEL
         # ==================================================
 
@@ -4684,6 +4725,27 @@ if page == "📄 PDF → Excel":
                     if len(invoice_numbers) == 1
                     else "multiple_invoices"
                 ]
+            # ==============================================
+            # MOTUL PRN FILE NAME
+            # ==============================================
+
+            if (
+                selected_vendor_no == "VEN0001554"
+                and
+                len(invoice_numbers) == 1
+            ):
+
+                current_prn_name = (
+                    prn_invoice_name
+                )
+
+            else:
+
+                current_prn_name = (
+                    str(invoice_numbers[0])
+                    if len(invoice_numbers) == 1
+                    else "multiple_invoices"
+                )
 
             # ==============================================
             # ЕДНА ФАКТУРА
@@ -4720,9 +4782,40 @@ if page == "📄 PDF → Excel":
                             "direct_prn_df"
                         ] = direct_prn_df.copy()
 
+                        # ==============================================
+                        # PRN ИМЕ + MOTUL СКЛАД
+                        # ==============================================
+                        
+                        prn_name = str(
+                            invoice_no
+                        ).strip()
+                        
+                        if (
+                            selected_vendor_no == "VEN0001554"
+                            and
+                            motul_warehouses
+                        ):
+                        
+                            warehouse = str(
+                                motul_warehouses[0].get(
+                                    "warehouse",
+                                    ""
+                                )
+                            ).strip().upper()
+                        
+                            if warehouse in {
+                                "B01",
+                                "B02"
+                            }:
+                        
+                                prn_name = (
+                                    f"{prn_name} "
+                                    f"({warehouse})"
+                                )
+                        
                         st.session_state[
                             "direct_prn_name"
-                        ] = str(invoice_no)
+                        ] = prn_name
 
                         st.session_state[
                             "container_prn_data"
