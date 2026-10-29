@@ -200,11 +200,6 @@ div[data-testid="stSidebarCollapsedControl"] {
     transform: translateY(-50%) !important;
     z-index: 999999 !important;
 }
-
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 section[data-testid="stSidebar"]
 div[data-testid="stSidebarHeader"] button {
     width: 52px !important;
@@ -222,6 +217,11 @@ div[data-testid="stSidebarHeader"] button svg {
     width: 32px !important;
     height: 32px !important;
 }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # ======================================================
 # NEON CONNECTION
