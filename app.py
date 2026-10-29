@@ -1863,42 +1863,58 @@ def extract_motul_rows(pdf_file):
                 discount_source_line
         })
 
-        invoice_number = extract_invoice_number(
-            full_text,
-            pdf_file.name
-        )
-    
-        warehouse_info = detect_motul_warehouse(
-            full_text
-        )
-    
-        return {
-            "invoice_number":
-                invoice_number,
-    
-            "pages":
-                processed_pages,
-    
-            "rows":
-                rows,
-    
-            "warehouse":
-                warehouse_info["warehouse"],
-    
-            "warehouse_source":
-                warehouse_info["source"],
-    
-            "warehouse_ref_no":
-                warehouse_info["ref_no"],
-    
-            "warehouse_address":
-                warehouse_info["address_match"]
-        }
+    # ==================================================
+    # MOTUL INVOICE + WAREHOUSE RESULT
+    # ==================================================
+
+    invoice_number = extract_invoice_number(
+        full_text,
+        pdf_file.name
+    )
+
+    warehouse_info = detect_motul_warehouse(
+        full_text
+    )
+
+    return {
+        "invoice_number":
+            invoice_number,
+
+        "pages":
+            processed_pages,
+
+        "rows":
+            rows,
+
+        "warehouse":
+            warehouse_info.get(
+                "warehouse",
+                "Неопределен"
+            ),
+
+        "warehouse_source":
+            warehouse_info.get(
+                "source",
+                ""
+            ),
+
+        "warehouse_ref_no":
+            warehouse_info.get(
+                "ref_no",
+                ""
+            ),
+
+        "warehouse_address":
+            warehouse_info.get(
+                "address_match",
+                ""
+            )
+    }
 # ======================================================
 # VALVOLINE PARSER
 # ======================================================
 
-def extract_valvoline_rows(pdf_file):
+def extract_valvoline_rows(df_file):
     """
     VALVOLINE parser за VEN0002867.
 
