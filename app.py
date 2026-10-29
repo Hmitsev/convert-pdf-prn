@@ -162,13 +162,13 @@ st.markdown(
     <style>
 
     section[data-testid="stSidebar"] {
-    background: rgba(10, 10, 14, 0.48) !important;
+    background: rgba(5, 5, 8, 0.18) !important;
 }
 
 section[data-testid="stSidebar"] > div {
     background: transparent !important;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(0.5px);
+    -webkit-backdrop-filter: blur(0.5px);
 }
 
     .main-card{
