@@ -205,7 +205,23 @@ div[data-testid="stSidebarCollapsedControl"] {
     """,
     unsafe_allow_html=True
 )
+section[data-testid="stSidebar"]
+div[data-testid="stSidebarHeader"] button {
+    width: 52px !important;
+    height: 52px !important;
+    min-width: 52px !important;
+    min-height: 52px !important;
 
+    background: rgba(20, 20, 25, 0.65) !important;
+    border: 1px solid rgba(255,255,255,0.15) !important;
+    border-radius: 12px !important;
+}
+
+section[data-testid="stSidebar"]
+div[data-testid="stSidebarHeader"] button svg {
+    width: 32px !important;
+    height: 32px !important;
+}
 
 # ======================================================
 # NEON CONNECTION
