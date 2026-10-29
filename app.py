@@ -4202,6 +4202,7 @@ if page == "📄 PDF → Excel":
         processed_pages = 0
         detected_invoice_rows = 0
         invoice_numbers = []
+        motul_warehouses = []
 
         with st.spinner(
             "Разпознаване на фактурните позиции..."
