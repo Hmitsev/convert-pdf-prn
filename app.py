@@ -162,20 +162,26 @@ st.markdown(
     <style>
 
     section[data-testid="stSidebar"] {
-    background: rgba(5, 5, 8, 0.18) !important;
-}
+        background: rgba(5, 5, 8, 0.18) !important;
+    }
 
-section[data-testid="stSidebar"] > div {
-    background: transparent !important;
-    backdrop-filter: blur(0.5px);
-    -webkit-backdrop-filter: blur(0.5px);
-}
+    section[data-testid="stSidebar"] > div {
+        background: transparent !important;
+        backdrop-filter: blur(0.5px) !important;
+        -webkit-backdrop-filter: blur(0.5px) !important;
+    }
 
-    .main-card{
-        background:rgba(0,0,0,0.35);
-        border-radius:15px;
-        padding:18px;
-        border:1px solid rgba(255,255,255,0.15);
+    /* Sidebar arrows - vertical center */
+    button[data-testid="stSidebarCollapseButton"],
+    button[data-testid="stSidebarExpandButton"] {
+        position: fixed !important;
+        top: 50% !important;
+        transform: translateY(-50%) !important;
+        z-index: 999999 !important;
+    }
+
+    button[data-testid="stSidebarExpandButton"] {
+        left: 12px !important;
     }
 
     </style>
