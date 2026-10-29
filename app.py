@@ -4333,9 +4333,23 @@ if page == "📄 PDF → Excel":
             ).sum()
         )
 
-        col1, col2, col3, col4 = (
-            st.columns(4)
-        )
+        if (
+            selected_vendor_no == "VEN0001554"
+            and
+            motul_warehouses
+        ):
+        
+            col1, col2, col3, col4, col5 = (
+                st.columns(5)
+            )
+        
+        else:
+        
+            col1, col2, col3, col4 = (
+                st.columns(4)
+            )
+        
+            col5 = None
 
         with col1:
 
@@ -4364,6 +4378,29 @@ if page == "📄 PDF → Excel":
                 "❗ Ненамерени",
                 not_found_count
             )
+            if col5 is not None:
+
+                warehouses_found = sorted(
+                    {
+                        str(info.get(
+                            "warehouse",
+                            "Неопределен"
+                        )).strip()
+                        for info in motul_warehouses
+                    }
+                )
+            
+                warehouse_display = " / ".join(
+                    warehouses_found
+                )
+            
+                with col5:
+            
+                    st.metric(
+                        "🏭 Склад",
+                        warehouse_display
+                    )
+
 
         st.info(
             f"Открити фактурни позиции: "
