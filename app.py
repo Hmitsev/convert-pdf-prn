@@ -161,10 +161,15 @@ st.markdown(
     """
     <style>
 
-    section[data-testid="stSidebar"] > div {
-        background: rgba(0,0,0,0.45);
-        backdrop-filter: blur(12px);
-    }
+    section[data-testid="stSidebar"] {
+    background: rgba(10, 10, 14, 0.48) !important;
+}
+
+section[data-testid="stSidebar"] > div {
+    background: transparent !important;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
 
     .main-card{
         background:rgba(0,0,0,0.35);
