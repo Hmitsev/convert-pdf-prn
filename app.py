@@ -1760,14 +1760,21 @@ def extract_motul_rows(pdf_file):
         )
 
         if invoice_unit == "CAR":
+
             final_quantity = (
                 invoice_quantity
                 * pack_quantity
             )
-        else:
+        
+        elif invoice_unit in {
+            "PCE",
+            "EA"
+        }:
+        
             final_quantity = invoice_quantity
-
-        if final_quantity <= 0:
+        
+        else:
+        
             continue
 
         # ==========================================
