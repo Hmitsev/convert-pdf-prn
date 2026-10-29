@@ -1505,7 +1505,7 @@ def extract_motul_rows(pdf_file):
         r"\b"
         r"(\d+(?:[.,]\d+)?)"
         r"\s+"
-        r"(PCE|CAR)"
+        r"(PCE|EA|CAR)"
         r"\s+"
         r"([\d.]+(?:,\d+)?)"
         r"\b",
