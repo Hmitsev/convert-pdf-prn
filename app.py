@@ -1646,55 +1646,105 @@ def extract_motul_rows(pdf_file):
         quantity_source_line = ""
 
         # ==========================================
-        # QUANTITY И GROSS AMOUNT
+        # MOTUL QUANTITY И GROSS AMOUNT
+        # ==========================================
+        #
+        # Поддържа и формат:
+        #
+        # net value 3,28 / 1 PCE 6 PCE 19,68
+        #
+        # В този случай:
+        # 1 PCE = ценова база
+        # 6 PCE = реалното фактурно количество
+        # 19,68 = Amount
+        #
+        # Затова взимаме ПОСЛЕДНОТО валидно
+        # Qty + PCE/CAR + Amount в продуктовия блок.
         # ==========================================
 
+        quantity_candidates = []
+
         for block_line_data in block_lines:
+
             block_line = block_line_data["text"]
 
-            quantity_match = (
-                quantity_amount_pattern.search(
+            matches = list(
+                quantity_amount_pattern.finditer(
                     block_line
                 )
             )
 
-            if not quantity_match:
-                continue
+            for quantity_match in matches:
 
-            parsed_quantity = parse_european_number(
-                quantity_match.group(1)
+                parsed_quantity = (
+                    parse_european_number(
+                        quantity_match.group(1)
+                    )
+                )
+
+                parsed_unit = (
+                    quantity_match.group(2)
+                    .upper()
+                    .strip()
+                )
+
+                parsed_amount = (
+                    parse_european_number(
+                        quantity_match.group(3)
+                    )
+                )
+
+                if parsed_quantity is None:
+                    continue
+
+                if parsed_amount is None:
+                    continue
+
+                if parsed_quantity <= 0:
+                    continue
+
+                if parsed_amount < 0:
+                    continue
+
+                quantity_candidates.append({
+                    "qty":
+                        parsed_quantity,
+
+                    "unit":
+                        parsed_unit,
+
+                    "amount":
+                        parsed_amount,
+
+                    "source_line":
+                        block_line
+                })
+
+        # Последният валиден кандидат е
+        # Quantity + Amount колоната на Motul.
+        if quantity_candidates:
+
+            selected_quantity = (
+                quantity_candidates[-1]
             )
 
-            parsed_unit = (
-                quantity_match.group(2)
-                .upper()
-                .strip()
+            invoice_quantity = (
+                selected_quantity["qty"]
             )
 
-            parsed_amount = parse_european_number(
-                quantity_match.group(3)
+            invoice_unit = (
+                selected_quantity["unit"]
             )
 
-            if parsed_quantity is None:
-                continue
+            gross_amount = (
+                selected_quantity["amount"]
+            )
 
-            if parsed_amount is None:
-                continue
-
-            if parsed_quantity <= 0:
-                continue
-
-            if parsed_amount < 0:
-                continue
-
-            invoice_quantity = parsed_quantity
-            invoice_unit = parsed_unit
-            gross_amount = parsed_amount
-            quantity_source_line = block_line
-
-            # Вземаме само първия валиден ред
-            # Quantity + PCE/CAR + Amount в блока.
-            break
+            quantity_source_line = (
+                selected_quantity[
+                    "source_line"
+                ]
+            )
 
         if invoice_quantity is None:
             continue
