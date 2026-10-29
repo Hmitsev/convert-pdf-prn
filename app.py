@@ -1645,106 +1645,193 @@ def extract_motul_rows(pdf_file):
         discount_amount = 0.0
         quantity_source_line = ""
 
-        # ==========================================
-        # MOTUL QUANTITY И GROSS AMOUNT
-        # ==========================================
-        #
-        # Поддържа и формат:
-        #
-        # net value 3,28 / 1 PCE 6 PCE 19,68
-        #
-        # В този случай:
-        # 1 PCE = ценова база
-        # 6 PCE = реалното фактурно количество
-        # 19,68 = Amount
-        #
-        # Затова взимаме ПОСЛЕДНОТО валидно
-        # Qty + PCE/CAR + Amount в продуктовия блок.
+                # ==========================================
+        # MOTUL QUANTITY + GROSS AMOUNT
         # ==========================================
 
         quantity_candidates = []
+
+        # Специален Motul формат:
+        #
+        # 3,28 / 1 PCE 6 PCE 19,68
+        #
+        # 1 PCE = ценова база
+        # 6 PCE = реално фактурно количество
+        # 19,68 = Amount
+        #
+        # => Qty = 6
+        # => Price = 19,68 / 6 = 3,28
+
+        motul_dual_qty_pattern = re.compile(
+            r"(?:[\d.,]+\s*/\s*)?"
+            r"(\d+(?:[.,]\d+)?)"
+            r"\s+(PCE|EA)"
+            r"\s+"
+            r"(\d+(?:[.,]\d+)?)"
+            r"\s+(PCE|EA)"
+            r"\s+"
+            r"([\d.]+(?:,\d+)?)",
+            re.IGNORECASE
+        )
+
+        special_match_found = False
 
         for block_line_data in block_lines:
 
             block_line = block_line_data["text"]
 
-            matches = list(
-                quantity_amount_pattern.finditer(
+            special_match = (
+                motul_dual_qty_pattern.search(
                     block_line
                 )
             )
 
-            for quantity_match in matches:
+            if not special_match:
+                continue
 
-                parsed_quantity = (
-                    parse_european_number(
-                        quantity_match.group(1)
-                    )
+            real_quantity = (
+                parse_european_number(
+                    special_match.group(3)
+                )
+            )
+
+            real_unit = (
+                special_match.group(4)
+                .upper()
+                .strip()
+            )
+
+            real_amount = (
+                parse_european_number(
+                    special_match.group(5)
+                )
+            )
+
+            if (
+                real_quantity is not None
+                and
+                real_quantity > 0
+                and
+                real_amount is not None
+                and
+                real_amount >= 0
+            ):
+
+                invoice_quantity = (
+                    real_quantity
                 )
 
-                parsed_unit = (
-                    quantity_match.group(2)
-                    .upper()
-                    .strip()
+                invoice_unit = (
+                    real_unit
                 )
 
-                parsed_amount = (
-                    parse_european_number(
-                        quantity_match.group(3)
-                    )
+                gross_amount = (
+                    real_amount
                 )
 
-                if parsed_quantity is None:
-                    continue
+                quantity_source_line = (
+                    block_line
+                )
 
-                if parsed_amount is None:
-                    continue
+                special_match_found = True
 
-                if parsed_quantity <= 0:
-                    continue
+                break
 
-                if parsed_amount < 0:
-                    continue
+        # ==========================================
+        # STANDARD MOTUL FORMAT
+        # ==========================================
+        #
+        # Ако специалният формат не е намерен,
+        # използваме досегашната работеща логика.
+        #
+        # Примери:
+        # 40 PCE 3.005,53
+        # 7 CAR 372,69
+        # ==========================================
 
-                quantity_candidates.append({
-                    "qty":
-                        parsed_quantity,
+        if not special_match_found:
 
-                    "unit":
-                        parsed_unit,
+            for block_line_data in block_lines:
 
-                    "amount":
-                        parsed_amount,
+                block_line = (
+                    block_line_data["text"]
+                )
 
-                    "source_line":
+                matches = list(
+                    quantity_amount_pattern.finditer(
                         block_line
-                })
+                    )
+                )
 
-        # Последният валиден кандидат е
-        # Quantity + Amount колоната на Motul.
-        if quantity_candidates:
+                for quantity_match in matches:
 
-            selected_quantity = (
-                quantity_candidates[-1]
-            )
+                    parsed_quantity = (
+                        parse_european_number(
+                            quantity_match.group(1)
+                        )
+                    )
 
-            invoice_quantity = (
-                selected_quantity["qty"]
-            )
+                    parsed_unit = (
+                        quantity_match.group(2)
+                        .upper()
+                        .strip()
+                    )
 
-            invoice_unit = (
-                selected_quantity["unit"]
-            )
+                    parsed_amount = (
+                        parse_european_number(
+                            quantity_match.group(3)
+                        )
+                    )
 
-            gross_amount = (
-                selected_quantity["amount"]
-            )
+                    if parsed_quantity is None:
+                        continue
 
-            quantity_source_line = (
-                selected_quantity[
-                    "source_line"
-                ]
-            )
+                    if parsed_amount is None:
+                        continue
+
+                    if parsed_quantity <= 0:
+                        continue
+
+                    if parsed_amount < 0:
+                        continue
+
+                    quantity_candidates.append({
+                        "qty":
+                            parsed_quantity,
+
+                        "unit":
+                            parsed_unit,
+
+                        "amount":
+                            parsed_amount,
+
+                        "source_line":
+                            block_line
+                    })
+
+            if quantity_candidates:
+
+                selected_quantity = (
+                    quantity_candidates[-1]
+                )
+
+                invoice_quantity = (
+                    selected_quantity["qty"]
+                )
+
+                invoice_unit = (
+                    selected_quantity["unit"]
+                )
+
+                gross_amount = (
+                    selected_quantity["amount"]
+                )
+
+                quantity_source_line = (
+                    selected_quantity[
+                        "source_line"
+                    ]
+                )
 
         if invoice_quantity is None:
             continue
