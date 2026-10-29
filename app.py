@@ -1284,6 +1284,183 @@ def extract_valvoline_litre_size(description):
     # се повтаря, например "... PL 20 L 20 L".
     # Последният валиден размер е правилната разфасовка.
     return valid_sizes[-1]
+# ======================================================
+# MOTUL WAREHOUSE DETECTION
+# ======================================================
+
+def detect_motul_warehouse(full_text):
+    """
+    Определя склада за MOTUL.
+
+    Приоритет:
+    1. Ref.-No. съдържа B01/B02 -> използваме него.
+    2. Ако няма надежден Ref.-No.:
+       Industrialna str. 7 -> B01
+       Industrialna str. 8 -> B02
+    3. Ако нищо не е намерено -> Неопределен.
+    """
+
+    if not full_text:
+        return {
+            "warehouse": "Неопределен",
+            "source": "Няма текст",
+            "ref_no": "",
+            "address_match": ""
+        }
+
+    text = str(full_text)
+
+    # Нормализиран вариант само за търсенето.
+    search_text = (
+        text
+        .upper()
+        .replace("В01", "B01")
+        .replace("В02", "B02")
+    )
+
+    # ==================================================
+    # 1. REF.-NO. ИМА ПРИОРИТЕТ
+    # ==================================================
+    #
+    # Примери:
+    # Ref.-No.: B02_20260903_1
+    # Ref.-No.: B01_20261006_1
+    #
+    # Позволяваме:
+    # Ref.-No.
+    # Ref No
+    # Ref.No.
+    # Ref - No
+    #
+
+    ref_match = re.search(
+        r"REF\s*[\.\-]?\s*NO\.?\s*[:\-]?\s*"
+        r"([A-Z0-9_\-./]+)",
+        search_text,
+        re.IGNORECASE
+    )
+
+    if ref_match:
+
+        ref_no = (
+            ref_match.group(1)
+            .strip()
+            .upper()
+        )
+
+        # B01 може да бъде в началото или
+        # вътре в референтния номер.
+        if re.search(
+            r"(?<![A-Z0-9])B01(?![A-Z0-9])",
+            ref_no
+        ):
+            return {
+                "warehouse": "B01",
+                "source": "Ref.-No.",
+                "ref_no": ref_no,
+                "address_match": ""
+            }
+
+        if re.search(
+            r"(?<![A-Z0-9])B02(?![A-Z0-9])",
+            ref_no
+        ):
+            return {
+                "warehouse": "B02",
+                "source": "Ref.-No.",
+                "ref_no": ref_no,
+                "address_match": ""
+            }
+
+        # Допълнителна защита за формати като:
+        # B01_...
+        # B02_...
+        if ref_no.startswith("B01"):
+            return {
+                "warehouse": "B01",
+                "source": "Ref.-No.",
+                "ref_no": ref_no,
+                "address_match": ""
+            }
+
+        if ref_no.startswith("B02"):
+            return {
+                "warehouse": "B02",
+                "source": "Ref.-No.",
+                "ref_no": ref_no,
+                "address_match": ""
+            }
+
+    else:
+
+        ref_no = ""
+
+    # ==================================================
+    # 2. FALLBACK КЪМ INVOICE / CONSIGNEE АДРЕСА
+    # ==================================================
+
+    # Поддържаме варианти:
+    #
+    # Industrialna str. 7
+    # Industrialna str 7
+    # Industrialna str. 7, building 4
+    #
+    # Не използваме Company адреса като отделна логика.
+    # Търсим текста на фактурата, но използваме само
+    # конкретния маркер Industrialna str.
+
+    address_b01 = re.search(
+        r"INDUSTRIALNA\s+STR\.?\s*[:\-]?\s*7\b",
+        search_text,
+        re.IGNORECASE
+    )
+
+    address_b02 = re.search(
+        r"INDUSTRIALNA\s+STR\.?\s*[:\-]?\s*8\b",
+        search_text,
+        re.IGNORECASE
+    )
+
+    # Ако е намерен само адрес 7.
+    if address_b01 and not address_b02:
+
+        return {
+            "warehouse": "B01",
+            "source": "Адрес",
+            "ref_no": ref_no,
+            "address_match": "Industrialna str. 7"
+        }
+
+    # Ако е намерен само адрес 8.
+    if address_b02 and not address_b01:
+
+        return {
+            "warehouse": "B02",
+            "source": "Адрес",
+            "ref_no": ref_no,
+            "address_match": "Industrialna str. 8"
+        }
+
+    # Ако по някаква причина PDF съдържа и двата адреса,
+    # не гадаем.
+    if address_b01 and address_b02:
+
+        return {
+            "warehouse": "Неопределен",
+            "source": "Конфликт в адреса",
+            "ref_no": ref_no,
+            "address_match": (
+                "Industrialna str. 7 + "
+                "Industrialna str. 8"
+            )
+        }
+
+    return {
+        "warehouse": "Неопределен",
+        "source": "Не е намерен Ref.-No. или адрес",
+        "ref_no": ref_no,
+        "address_match": ""
+    }
     
 # ======================================================
 # MOTUL PARSER
@@ -1736,11 +1913,27 @@ def extract_motul_rows(pdf_file):
         full_text,
         pdf_file.name
     )
-
+    
+    warehouse_info = detect_motul_warehouse(
+        full_text
+    )
+    
     return {
         "invoice_number": invoice_number,
         "pages": processed_pages,
-        "rows": rows
+        "rows": rows,
+    
+        "warehouse":
+            warehouse_info["warehouse"],
+    
+        "warehouse_source":
+            warehouse_info["source"],
+    
+        "warehouse_ref_no":
+            warehouse_info["ref_no"],
+    
+        "warehouse_address":
+            warehouse_info["address_match"]
     }
 # ======================================================
 # VALVOLINE PARSER
