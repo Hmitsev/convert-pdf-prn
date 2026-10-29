@@ -4612,6 +4612,10 @@ if page == "📄 PDF → Excel":
                 motul_debug_df = final_result_df[
                     [
                         "_invoice_item",
+                        "_description",
+                        "_invoice_qty",
+                        "_invoice_unit",
+                        "_pack_qty",
                         "Qty",
                         "Price 1 pc",
                         "_line_total",
