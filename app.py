@@ -972,14 +972,19 @@ def extract_castrol_rows(pdf_file):
 
 def extract_motul_pack_quantity(description):
     """
-    Извлича броя артикули в един кашон от описанието.
+    Извлича броя физически опаковки в една Motul
+    транспортна единица.
 
-    Примери:
-    8100 ECO-LITE 0W20 4X5L       -> 4
-    8100 ECO-CLEAN 0W20 12X1L     -> 12
-    C5 CHAIN PASTE 12X0.150L       -> 12
-    HIGH-TORQUE DCTF 12X1L D38     -> 12
-    TEKMA ULTIMA 5W-30 LS 20L      -> 1
+    Поддържа например:
+    6X1L
+    6 X 1L
+    6x1 L
+    6×1L
+    6/1L
+    6 x 2 LT
+    12X0.150L
+    4X5L
+    24X400ML
     """
 
     if description is None:
@@ -987,17 +992,28 @@ def extract_motul_pack_quantity(description):
 
     text = str(description).upper().strip()
 
-    # Позволява:
-    # 12X1L
-    # 12 X 1L
-    # 12X0.150L
-    # 12X0,150L
-    # 4X5L
-    # 24X400ML
+    text = (
+        text
+        .replace("×", "X")
+        .replace("Х", "X")
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    ).strip()
+
+    # Основна разфасовка:
+    # 6X1L, 6 X 1 L, 6/1L, 12X0.150L
     pack_match = re.search(
-        r"\b(\d{1,4})\s*[XХ×]\s*"
-        r"\d+(?:[.,]\d+)?\s*"
-        r"(?:ML|CL|DL|L|LT|LTR|KG|G)?\b",
+        r"(?<!\d)"
+        r"(\d{1,4})"
+        r"\s*(?:X|/)\s*"
+        r"\d+(?:[.,]\d+)?"
+        r"\s*"
+        r"(?:ML|CL|DL|L|LT|LTR|KG|G)?"
+        r"(?!\d)",
         text,
         re.IGNORECASE
     )
@@ -1006,11 +1022,15 @@ def extract_motul_pack_quantity(description):
         return 1
 
     try:
-        pack_quantity = int(pack_match.group(1))
-    except Exception:
+        pack_quantity = int(
+            pack_match.group(1)
+        )
+    except (TypeError, ValueError):
         return 1
 
-    if pack_quantity <= 0:
+    if not (
+        1 <= pack_quantity <= 1000
+    ):
         return 1
 
     return pack_quantity
