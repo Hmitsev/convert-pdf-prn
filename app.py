@@ -4594,7 +4594,7 @@ if page == "📄 PDF → Excel":
                 # MOTUL WAREHOUSE RESULT
                 # ==========================================
                 
-                if selected_vendor_no == "VEN0001554":
+                if selected_vendor_no in ("VEN0001554", "VEN0001135"):
                 
                     motul_warehouses.append({
                         "warehouse":
@@ -4882,10 +4882,39 @@ if page == "📄 PDF → Excel":
                             else:
                     
                                 st.caption(
-                                    "⚠️ Motul складът не може "
+                                    "⚠️ Складът не може "
                                     "да бъде определен автоматично."
                                 )
 
+
+        # Strong warehouse visual alert only for MOTUL and TotalEnergies.
+        if motul_warehouses and selected_vendor_no in ("VEN0001554", "VEN0001135"):
+            warehouses_found = sorted({
+                str(info.get("warehouse", "Неопределен")).strip()
+                for info in motul_warehouses
+            })
+            warehouse_display = " / ".join(warehouses_found)
+            st.markdown(
+                f"""
+                <div style="
+                    margin: 14px 0 18px 0;
+                    padding: 18px 24px;
+                    border: 3px solid #ff7a00;
+                    border-radius: 14px;
+                    background: linear-gradient(90deg, rgba(255,122,0,0.24), rgba(255,193,7,0.10));
+                    box-shadow: 0 0 22px rgba(255,122,0,0.45);
+                    text-align: center;
+                ">
+                    <div style="font-size: 16px; font-weight: 800; color: #ffb15c; letter-spacing: 1px;">
+                        🏭 ВНИМАНИЕ: СКЛАД ЗА ПРИЕМАНЕ
+                    </div>
+                    <div style="font-size: 42px; line-height: 1.05; font-weight: 900; color: #ffffff; margin-top: 5px;">
+                        {warehouse_display}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
         st.info(
             f"Открити фактурни позиции: "
