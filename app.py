@@ -2776,20 +2776,18 @@ def detect_totalenergies_warehouse(full_text):
 
 
 def extract_totalenergies_rows(pdf_file):
-    """TotalEnergies Bulgaria: SAP code is Cross Ref; Qty and unit price are used 1:1."""
+    """TotalEnergies: SAP code = Cross Ref; convert invoice packs to individual bottles from e.g. 3B5L / 12B1L."""
     rows = []
     full_text = ""
     processed_pages = 0
-    # pdfplumber sample:
-    # 1 216626 QUARTZ 9000 NFC БР 45 575,100 83,44 3.754,80 750,96 4.505,76
     row_pattern = re.compile(
         r"^\s*(\d{1,4})\s+"             # position
         r"(\d{5,10})\s+"                 # SAP code = Cross Reference
-        r"(.+?)\s+"                       # description
+        r"(.+?)\s+"                       # first description line
         r"(БР|BR|EA|PCE)\s+"              # unit
-        r"([\d.,]+)\s+"                   # Qty
+        r"([\d.,]+)\s+"                   # invoice pack Qty
         r"([\d.,]+)\s+"                   # net weight
-        r"([\d.,]+)\s+"                   # unit price
+        r"([\d.,]+)\s+"                   # invoice unit price per pack
         r"([\d.,]+)\s+"                   # subtotal
         r"([\d.,]+)\s+"                   # VAT
         r"([\d.,]+)\s*$",                 # final total
@@ -2803,8 +2801,8 @@ def extract_totalenergies_rows(pdf_file):
             if not page_text:
                 continue
             full_text += page_text + "\n"
-            for raw_line in page_text.splitlines():
-                line = " ".join(str(raw_line).replace("\xa0", " ").split())
+            lines = [" ".join(str(x).replace("\xa0", " ").split()) for x in page_text.splitlines()]
+            for line_index, line in enumerate(lines):
                 m = row_pattern.match(line)
                 if not m:
                     continue
@@ -2812,29 +2810,48 @@ def extract_totalenergies_rows(pdf_file):
                 sap_code = m.group(2)
                 description = m.group(3).strip()
                 invoice_unit = m.group(4).upper()
-                qty = parse_european_number(m.group(5))
-                unit_price = parse_european_number(m.group(7))
+                invoice_qty = parse_european_number(m.group(5))
+                invoice_unit_price = parse_european_number(m.group(7))
                 subtotal = parse_european_number(m.group(8))
-                if qty is None or qty <= 0 or unit_price is None or unit_price < 0:
+                if invoice_qty is None or invoice_qty <= 0 or invoice_unit_price is None or invoice_unit_price < 0:
                     continue
-                # No recalculation requested: Qty and price are 1:1 from invoice.
-                calculation_ok = True
-                if subtotal is not None:
-                    calculation_ok = abs((qty * unit_price) - subtotal) <= max(0.05, abs(subtotal) * 0.0001)
+
+                # Total prints the pack information on the continuation line,
+                # e.g. "5W30 3B5L TOT 1RO" or "5W40 12B1L TOT RO".
+                continuation = ""
+                if line_index + 1 < len(lines):
+                    candidate = lines[line_index + 1]
+                    if not row_pattern.match(candidate) and not re.match(r"^(Сток\.|УСЛОВИЯ|ДАНЪЧНА|Page\b)", candidate, re.IGNORECASE):
+                        continuation = candidate
+                full_description = (description + " " + continuation).strip()
+
+                # B = bottles in one invoiced pack. Litres identify bottle size but
+                # do not multiply the piece count. 3B5L => x3 pieces; 12B1L => x12 pieces.
+                pack_match = re.search(r"(?<!\d)(\d{1,3})\s*[BВ]\s*(\d+(?:[.,]\d+)?)\s*L\b", full_description, re.IGNORECASE)
+                bottles_per_pack = int(pack_match.group(1)) if pack_match else 1
+                if bottles_per_pack <= 0:
+                    bottles_per_pack = 1
+
+                final_qty = invoice_qty * bottles_per_pack
+                final_price = invoice_unit_price / bottles_per_pack
+                final_price = round(final_price, 10)
+                expected_total = subtotal if subtotal is not None else invoice_qty * invoice_unit_price
+                calculation_ok = abs((final_qty * final_price) - expected_total) <= max(0.05, abs(expected_total) * 0.0001)
+
                 rows.append({
                     "invoice_item": sap_code,
                     "normalized_invoice_item": normalize_item_number(sap_code),
-                    "description": description,
+                    "description": full_description,
                     "position_no": position_no,
-                    "invoice_qty": qty,
+                    "invoice_qty": invoice_qty,
                     "invoice_unit": invoice_unit,
-                    "pack_qty": 1,
-                    "qty": qty,
-                    "price": unit_price,
-                    "line_total": subtotal if subtotal is not None else qty * unit_price,
+                    "pack_qty": bottles_per_pack,
+                    "qty": final_qty,
+                    "price": final_price,
+                    "line_total": expected_total,
                     "calculation_ok": calculation_ok,
                     "page": page_number,
-                    "source_line": line
+                    "source_line": line + (" | " + continuation if continuation else "")
                 })
     invoice_match = re.search(r"НОМЕР\s*:\s*(\d{6,20})", full_text, re.IGNORECASE)
     invoice_number = invoice_match.group(1) if invoice_match else extract_invoice_number(full_text, pdf_file.name)
