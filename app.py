@@ -4461,7 +4461,7 @@ if page == "📄 PDF → Excel":
                     )
             
                 # Shell / Orbico Bulgaria
-                elif selected_vendor_no == "VEN0002390":
+                elif selected_vendor_no == "VEN0000239":
                     extracted = extract_shell_orbiko_rows(
                         pdf_file
                     )
