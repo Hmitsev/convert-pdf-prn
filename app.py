@@ -2738,6 +2738,62 @@ def extract_valvoline_rows(df_file):
     }
 
 # ======================================================
+# SHELL / ORBIKO PARSER
+# ======================================================
+def extract_shell_orbiko_rows(pdf_file):
+    """Orbico/Shell: Material -> Cross Ref, Qty [Br] -> pieces, price = Net value / pieces."""
+    rows = []
+    full_text = ""
+    processed_pages = 0
+    row_pattern = re.compile(
+        r"^\s*(\d{1,4})\s+(\d{10})\s+(.+?)\s+"
+        r"(\d{8})\s+(\d+(?:[.,]\d+)?)\s+([\d\s.,]+?)\s+"
+        r"(Л|КГ|L|KG)\s+([\d.,]+)\s+"
+        r"[\d.,]+\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+\s+"
+        r"[\d.,]+\s+[\d.,]+\s+([\d.,]+)\s+([\d.,]+)\s*$",
+        re.IGNORECASE
+    )
+    pdf_file.seek(0)
+    with pdfplumber.open(pdf_file) as pdf:
+        processed_pages = len(pdf.pages)
+        for page_number, page in enumerate(pdf.pages, start=1):
+            page_text = page.extract_text(x_tolerance=2, y_tolerance=3)
+            if not page_text:
+                continue
+            full_text += page_text + "\n"
+            for raw_line in page_text.splitlines():
+                line = " ".join(str(raw_line).replace("\xa0", " ").split())
+                m = row_pattern.match(line)
+                if not m:
+                    continue
+                position_no, material_no, description = m.group(1), m.group(2), m.group(3).strip()
+                pieces = parse_european_number(m.group(5))
+                measure_qty = parse_european_number(m.group(6).replace(" ", ""))
+                unit = m.group(7).upper()
+                net_value = parse_european_number(m.group(10))
+                if pieces is None or pieces <= 0 or net_value is None or net_value < 0:
+                    continue
+                final_price = round(net_value / pieces, 10)
+                rows.append({
+                    "invoice_item": material_no,
+                    "normalized_invoice_item": normalize_item_number(material_no),
+                    "description": description,
+                    "position_no": position_no,
+                    "invoice_qty": measure_qty,
+                    "invoice_unit": unit,
+                    "pack_qty": pieces,
+                    "qty": pieces,
+                    "price": final_price,
+                    "line_total": net_value,
+                    "calculation_ok": abs((pieces * final_price) - net_value) <= max(0.02, abs(net_value) * 0.0001),
+                    "page": page_number,
+                    "source_line": line
+                })
+    invoice_match = re.search(r"ФАКТУРА\s+(\d{6,20})", full_text, re.IGNORECASE)
+    invoice_number = invoice_match.group(1) if invoice_match else extract_invoice_number(full_text, pdf_file.name)
+    return {"invoice_number": invoice_number, "pages": processed_pages, "rows": rows}
+
+# ======================================================
 # CONTAINER INVOICE DETECTION
 # ======================================================
 
@@ -4404,6 +4460,12 @@ if page == "📄 PDF → Excel":
                         pdf_file
                     )
             
+                # Shell / Orbico Bulgaria
+                elif selected_vendor_no == "VEN0002390":
+                    extracted = extract_shell_orbiko_rows(
+                        pdf_file
+                    )
+
                 # Federal и останалите доставчици
                 else:
             
