@@ -2737,6 +2737,117 @@ def extract_valvoline_rows(df_file):
             extracted_total
     }
 
+def is_totalenergies_invoice_pdf(pdf_file):
+    pdf_file.seek(0)
+    text = ""
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            for page in pdf.pages[:2]:
+                page_text = page.extract_text(x_tolerance=2, y_tolerance=3)
+                if page_text:
+                    text += page_text.upper() + "\n"
+    except Exception:
+        pdf_file.seek(0)
+        return False
+    finally:
+        pdf_file.seek(0)
+    return (
+        "ТОТАЛЕНЕРДЖИС МАРКЕТИНГ БЪЛГАРИЯ" in text
+        or "TOTALENERGIES MARKETING BULGARIA" in text
+    )
+
+
+# ======================================================
+# TOTALENERGIES PARSER + WAREHOUSE
+# ======================================================
+def detect_totalenergies_warehouse(full_text):
+    """B01/B02 from delivered-to label first, then Industrialna 7/8 address fallback."""
+    text = str(full_text or "").upper().replace("В01", "B01").replace("В02", "B02")
+    delivery_match = re.search(r"ДОСТАВЕНО\s+ДО\s*:?.{0,350}", text, re.IGNORECASE | re.DOTALL)
+    delivery_text = delivery_match.group(0) if delivery_match else text[:3000]
+    code_match = re.search(r"СКЛАД\s*(B0[12])\b", delivery_text, re.IGNORECASE)
+    if code_match:
+        return {"warehouse": code_match.group(1).upper(), "source": "Доставено до", "address_match": ""}
+    if re.search(r"ИНДУСТРИАЛНА\s+7\b", delivery_text, re.IGNORECASE):
+        return {"warehouse": "B01", "source": "Адрес", "address_match": "ул. Индустриална 7"}
+    if re.search(r"ИНДУСТРИАЛНА\s+8\b", delivery_text, re.IGNORECASE):
+        return {"warehouse": "B02", "source": "Адрес", "address_match": "ул. Индустриална 8"}
+    return {"warehouse": "Неопределен", "source": "Не е намерен склад", "address_match": ""}
+
+
+def extract_totalenergies_rows(pdf_file):
+    """TotalEnergies Bulgaria: SAP code is Cross Ref; Qty and unit price are used 1:1."""
+    rows = []
+    full_text = ""
+    processed_pages = 0
+    # pdfplumber sample:
+    # 1 216626 QUARTZ 9000 NFC БР 45 575,100 83,44 3.754,80 750,96 4.505,76
+    row_pattern = re.compile(
+        r"^\s*(\d{1,4})\s+"             # position
+        r"(\d{5,10})\s+"                 # SAP code = Cross Reference
+        r"(.+?)\s+"                       # description
+        r"(БР|BR|EA|PCE)\s+"              # unit
+        r"([\d.,]+)\s+"                   # Qty
+        r"([\d.,]+)\s+"                   # net weight
+        r"([\d.,]+)\s+"                   # unit price
+        r"([\d.,]+)\s+"                   # subtotal
+        r"([\d.,]+)\s+"                   # VAT
+        r"([\d.,]+)\s*$",                 # final total
+        re.IGNORECASE
+    )
+    pdf_file.seek(0)
+    with pdfplumber.open(pdf_file) as pdf:
+        processed_pages = len(pdf.pages)
+        for page_number, page in enumerate(pdf.pages, start=1):
+            page_text = page.extract_text(x_tolerance=2, y_tolerance=3)
+            if not page_text:
+                continue
+            full_text += page_text + "\n"
+            for raw_line in page_text.splitlines():
+                line = " ".join(str(raw_line).replace("\xa0", " ").split())
+                m = row_pattern.match(line)
+                if not m:
+                    continue
+                position_no = m.group(1)
+                sap_code = m.group(2)
+                description = m.group(3).strip()
+                invoice_unit = m.group(4).upper()
+                qty = parse_european_number(m.group(5))
+                unit_price = parse_european_number(m.group(7))
+                subtotal = parse_european_number(m.group(8))
+                if qty is None or qty <= 0 or unit_price is None or unit_price < 0:
+                    continue
+                # No recalculation requested: Qty and price are 1:1 from invoice.
+                calculation_ok = True
+                if subtotal is not None:
+                    calculation_ok = abs((qty * unit_price) - subtotal) <= max(0.05, abs(subtotal) * 0.0001)
+                rows.append({
+                    "invoice_item": sap_code,
+                    "normalized_invoice_item": normalize_item_number(sap_code),
+                    "description": description,
+                    "position_no": position_no,
+                    "invoice_qty": qty,
+                    "invoice_unit": invoice_unit,
+                    "pack_qty": 1,
+                    "qty": qty,
+                    "price": unit_price,
+                    "line_total": subtotal if subtotal is not None else qty * unit_price,
+                    "calculation_ok": calculation_ok,
+                    "page": page_number,
+                    "source_line": line
+                })
+    invoice_match = re.search(r"НОМЕР\s*:\s*(\d{6,20})", full_text, re.IGNORECASE)
+    invoice_number = invoice_match.group(1) if invoice_match else extract_invoice_number(full_text, pdf_file.name)
+    warehouse_info = detect_totalenergies_warehouse(full_text)
+    return {
+        "invoice_number": invoice_number,
+        "pages": processed_pages,
+        "rows": rows,
+        "warehouse": warehouse_info["warehouse"],
+        "warehouse_source": warehouse_info["source"],
+        "warehouse_address": warehouse_info["address_match"]
+    }
+
 # ======================================================
 # SHELL / ORBIKO PARSER
 # ======================================================
@@ -4440,6 +4551,13 @@ if page == "📄 PDF → Excel":
                         )
                     )
             
+                # TotalEnergies Marketing Bulgaria - identify by supplier text in the PDF.
+                # This avoids hard-coding an unverified Vendor No.
+                elif is_totalenergies_invoice_pdf(pdf_file):
+                    extracted = extract_totalenergies_rows(
+                        pdf_file
+                    )
+
                 # Castrol
                 elif selected_vendor_no == "VEN0002914":
             
@@ -4548,10 +4666,7 @@ if page == "📄 PDF → Excel":
                     # MOTUL WAREHOUSE METADATA
                     # ======================================
 
-                    if (
-                        selected_vendor_no
-                        == "VEN0001554"
-                    ):
+                    if extracted.get("warehouse"):
 
                         matched_df["_warehouse"] = str(
                             extracted.get(
@@ -4662,8 +4777,6 @@ if page == "📄 PDF → Excel":
         )
 
         if (
-            selected_vendor_no == "VEN0001554"
-            and
             motul_warehouses
         ):
         
@@ -4731,8 +4844,6 @@ if page == "📄 PDF → Excel":
                         warehouse_display
                     )
                     if (
-                        selected_vendor_no == "VEN0001554"
-                        and
                         motul_warehouses
                     ):
                     
@@ -4872,8 +4983,6 @@ if page == "📄 PDF → Excel":
             # ==============================================
 
             if (
-                selected_vendor_no == "VEN0001554"
-                and
                 motul_warehouses
             ):
 
@@ -5044,8 +5153,6 @@ if page == "📄 PDF → Excel":
                         ).strip()
                         
                         if (
-                            selected_vendor_no == "VEN0001554"
-                            and
                             motul_warehouses
                         ):
                         
