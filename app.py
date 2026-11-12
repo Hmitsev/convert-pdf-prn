@@ -5987,76 +5987,58 @@ if page == PAGE_PRN:
             "от PDF → Excel."
         )
 
-    # ==================================================
-    # 2. РЪЧНО КАЧЕН EXCEL
-    # ==================================================
+# ==================================================
+# 2. РЪЧНО КАЧЕН EXCEL
+# ==================================================
+if uploaded_excel is not None:
+    try:
+        uploaded_df = pd.read_excel(
+            uploaded_excel,
+            engine="openpyxl"
+        )
 
-    if uploaded_excel is not None:
+        # ==================================================
+        # EXCEL КОЛОНИ ПО ПОЗИЦИЯ
+        # ==================================================
+        # A = Invoice
+        # B = Item
+        # C = Quantity
+        # D = Price
+        #
+        # Имената на колоните в първия ред НЯМАТ значение.
+        # Важна е единствено позицията им.
 
-        try:
-
-            uploaded_df = pd.read_excel(
-                uploaded_excel,
-                engine="openpyxl"
-            )
-
-            # ==================================================
-            # EXCEL КОЛОНИ ПО ПОЗИЦИЯ
-            # ==================================================
-            # A = Invoice
-            # B = Item
-            # C = Quantity
-            # D = Price
-            #
-            # Имената в първия ред нямат значение.
-            
-            if uploaded_df.shape[1] < 4:
-                st.error(
-                    "Excel файлът трябва да съдържа поне 4 колони: "
-                    "A = Invoice, B = Item, C = Quantity, D = Price."
-                )
-            else:
-                prn_source_df = pd.DataFrame({
-                    "Item": uploaded_df.iloc[:, 1],
-                    "Qty": uploaded_df.iloc[:, 2],
-                    "Price 1 pc": uploaded_df.iloc[:, 3],
-                })
-            
-                prn_file_name = (
-                    uploaded_excel.name
-                    .replace(".xlsx", "")
-                    .replace(".xls", "")
-                )
-            
-                source_description = (
-                    f"✅ Използва се каченият Excel: "
-                    f"{uploaded_excel.name}"
-                )
-
-                # Каченият Excel има приоритет
-                # пред директно заредените PDF данни.
-                prn_source_df = uploaded_df[
-                    required_cols
-                ].copy()
-
-                prn_file_name = (
-                    uploaded_excel.name
-                    .replace(".xlsx", "")
-                    .replace(".xls", "")
-                )
-
-                source_description = (
-                    f"✅ Използва се каченият Excel: "
-                    f"{uploaded_excel.name}"
-                )
-
-        except Exception as error:
-
+        if uploaded_df.shape[1] < 4:
             st.error(
-                f"Грешка при четене на Excel: "
-                f"{type(error).__name__}: {error}"
+                "Excel файлът трябва да съдържа поне "
+                "4 колони: A = Invoice, B = Item, "
+                "C = Quantity, D = Price."
+            )
+        else:
+            # Каченият Excel има приоритет
+            # пред директно заредените PDF данни.
+            prn_source_df = pd.DataFrame({
+                "Item": uploaded_df.iloc[:, 1],
+                "Qty": uploaded_df.iloc[:, 2],
+                "Price 1 pc": uploaded_df.iloc[:, 3],
+            })
+
+            prn_file_name = (
+                uploaded_excel.name
+                .replace(".xlsx", "")
+                .replace(".xls", "")
             )
 
+            source_description = (
+                f"✅ Използва се каченият Excel: "
+                f"{uploaded_excel.name}"
+            )
+
+    except Exception as error:
+        st.error(
+            f"Грешка при четене на Excel: "
+            f"{type(error).__name__}: {error}"
+        )
     # ==================================================
     # PRN PREVIEW И ГЕНЕРИРАНЕ
     # ==================================================
