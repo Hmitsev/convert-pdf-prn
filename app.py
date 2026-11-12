@@ -6000,43 +6000,38 @@ if page == PAGE_PRN:
                 engine="openpyxl"
             )
 
-            uploaded_df.columns = [
-                str(col).strip()
-                for col in uploaded_df.columns
-            ]
-
-            # Поддържа както Item, така и Item No.
-            if (
-                "Item" not in uploaded_df.columns
-                and
-                "Item No." in uploaded_df.columns
-            ):
-                uploaded_df = uploaded_df.rename(
-                    columns={
-                        "Item No.": "Item"
-                    }
-                )
-
-            required_cols = [
-                "Item",
-                "Qty",
-                "Price 1 pc"
-            ]
-
-            missing_cols = [
-                col
-                for col in required_cols
-                if col not in uploaded_df.columns
-            ]
-
-            if missing_cols:
-
+            # ==================================================
+            # EXCEL КОЛОНИ ПО ПОЗИЦИЯ
+            # ==================================================
+            # A = Invoice
+            # B = Item
+            # C = Quantity
+            # D = Price
+            #
+            # Имената в първия ред нямат значение.
+            
+            if uploaded_df.shape[1] < 4:
                 st.error(
-                    "Липсват необходимите колони: "
-                    + ", ".join(missing_cols)
+                    "Excel файлът трябва да съдържа поне 4 колони: "
+                    "A = Invoice, B = Item, C = Quantity, D = Price."
                 )
-
             else:
+                prn_source_df = pd.DataFrame({
+                    "Item": uploaded_df.iloc[:, 1],
+                    "Qty": uploaded_df.iloc[:, 2],
+                    "Price 1 pc": uploaded_df.iloc[:, 3],
+                })
+            
+                prn_file_name = (
+                    uploaded_excel.name
+                    .replace(".xlsx", "")
+                    .replace(".xls", "")
+                )
+            
+                source_description = (
+                    f"✅ Използва се каченият Excel: "
+                    f"{uploaded_excel.name}"
+                )
 
                 # Каченият Excel има приоритет
                 # пред директно заредените PDF данни.
