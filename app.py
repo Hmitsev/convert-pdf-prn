@@ -328,61 +328,89 @@ if "container_prn_invoice_name" not in st.session_state:
 if "container_prn_loaded" not in st.session_state:
     st.session_state.container_prn_loaded = False
 # ======================================================
-# SIDEBAR
+# NAVIGATION
 # ======================================================
-
-st.sidebar.title(
-    "PDF → PRN Converter"
-)
-
-# ======================================================
-# PAGE NAVIGATION
-# ======================================================
-
 PAGE_PDF = "📄 PDF → Excel"
 PAGE_PRN = "🧾 Excel → PRN"
 
 if "converter_page" not in st.session_state:
     st.session_state.converter_page = PAGE_PDF
 
-
-def open_pdf_page():
-    st.session_state.converter_page = PAGE_PDF
-
-
-def open_prn_page():
-    st.session_state.converter_page = PAGE_PRN
-
-
-page = st.sidebar.radio(
-    "Menu",
-    [
-        PAGE_PDF,
-        PAGE_PRN
-    ],
-    index=(
-        0
-        if st.session_state.converter_page == PAGE_PDF
-        else 1
-    ),
-    key="converter_menu",
-    on_change=lambda: st.session_state.update(
-        converter_page=st.session_state.converter_menu
-    )
-)
-
 # ======================================================
-# LOGOUT
+# SIDEBAR - САМО ИЗХОД
 # ======================================================
+st.sidebar.markdown("### 🚪 Сесия")
 
 if st.sidebar.button(
-    "🚪 Logout"
+    "🚪 Изход",
+    use_container_width=True,
+    key="logout_button"
 ):
-
     st.session_state["logged_in"] = False
-
     st.rerun()
 
+# ======================================================
+# CENTRAL NAVIGATION
+# ======================================================
+
+st.markdown(
+    """
+    <style>
+
+    /* Централните navigation бутони */
+    div[data-testid="stHorizontalBlock"] button {
+        min-height: 58px !important;
+        border-radius: 14px !important;
+        font-size: 17px !important;
+        font-weight: 800 !important;
+        transition: all 0.2s ease !important;
+    }
+
+    div[data-testid="stHorizontalBlock"] button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.30);
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+nav_col1, nav_col2 = st.columns(2, gap="medium")
+
+with nav_col1:
+
+    pdf_active = (
+        st.session_state.converter_page == PAGE_PDF
+    )
+
+    if st.button(
+        "📄  PDF → Excel",
+        use_container_width=True,
+        type="primary" if pdf_active else "secondary",
+        key="nav_pdf"
+    ):
+        st.session_state.converter_page = PAGE_PDF
+        st.rerun()
+
+with nav_col2:
+
+    prn_active = (
+        st.session_state.converter_page == PAGE_PRN
+    )
+
+    if st.button(
+        "🧾  Excel → PRN",
+        use_container_width=True,
+        type="primary" if prn_active else "secondary",
+        key="nav_prn"
+    ):
+        st.session_state.converter_page = PAGE_PRN
+        st.rerun()
+
+page = st.session_state.converter_page
+
+st.markdown("---")
 
 # ======================================================
 # VENDOR DROPDOWN
