@@ -1662,6 +1662,19 @@ def extract_motul_rows(pdf_file):
             block_start:block_end
         ]
 
+        # The last product block can also contain the invoice summary.
+        # Everything from "Net Amount" onward is invoice-level data.
+        # It must never be treated as a discount of the last product row.
+        invoice_summary_start = None
+        for summary_index, summary_line_data in enumerate(block_lines):
+            summary_line_upper = summary_line_data["text"].upper()
+            if re.search(r"\bNET\s+AMOUNT\s*:?", summary_line_upper):
+                invoice_summary_start = summary_index
+                break
+
+        if invoice_summary_start is not None:
+            block_lines = block_lines[:invoice_summary_start]
+
         position_no = item_data["position_no"]
         invoice_item = item_data["item_no"]
         description = item_data["description"]
