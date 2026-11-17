@@ -464,7 +464,7 @@ else:
 # LOAD CROSS REFERENCES FROM BOTH NEON PROJECTS
 # ======================================================
 
-@st.cache_data(ttl=360)
+@st.cache_data(ttl=3600)
 def load_cross_references(vendor_no):
 
     databases = [
@@ -2857,6 +2857,16 @@ def extract_totalenergies_rows(pdf_file):
         re.IGNORECASE
     )
 
+    # A standalone package such as 208L, 60L or 20L means one physical
+    # package per invoiced piece. It is different from multipacks such as
+    # 3B4L, where the first number is the multiplier.
+    single_pack_pattern = re.compile(
+        r"(?<![BВ\d])"
+        r"(\d+(?:[.,]\d+)?)\s*"
+        r"(?:ML|CL|DL|LTR|LT|L|KG|G)\b",
+        re.IGNORECASE
+    )
+
     # A new product must begin with position number + SAP code.
     new_product_prefix = re.compile(
         r"^\s*\d{1,4}\s+\d{5,10}\b",
@@ -2984,20 +2994,31 @@ def extract_totalenergies_rows(pdf_file):
                     ).strip()
                     pack_match = pack_pattern.search(full_description)
 
-            # 3. Never silently assume x1 when packaging is unknown.
-            if not pack_match:
-                warnings.append({
-                    "position_no": position_no,
-                    "invoice_item": sap_code,
-                    "reason": (
-                        "Не е потвърдена разфасовка. "
-                        "Редът е спрян и не е експортиран като x1."
-                    ),
-                    "source_line": line
-                })
-                continue
+            # 3. Decide safely between multipack and one standalone pack.
+            #    - 3B4L / 12B1L -> multiplier from the number before B.
+            #    - 208L / 60L / 20L -> one physical package (x1).
+            #    - no confirmed packaging -> stop; never guess x1.
+            if pack_match:
+                bottles_per_pack = int(pack_match.group(1))
+            else:
+                single_pack_match = single_pack_pattern.search(
+                    full_description
+                )
+                if single_pack_match:
+                    bottles_per_pack = 1
+                else:
+                    warnings.append({
+                        "position_no": position_no,
+                        "invoice_item": sap_code,
+                        "reason": (
+                            "Не е потвърдена нито multipack разфасовка "
+                            "(например 3B4L), нито единична опаковка "
+                            "(например 208L). Редът е спрян."
+                        ),
+                        "source_line": line
+                    })
+                    continue
 
-            bottles_per_pack = int(pack_match.group(1))
             if bottles_per_pack <= 0:
                 warnings.append({
                     "position_no": position_no,
