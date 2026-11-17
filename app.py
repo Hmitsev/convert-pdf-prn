@@ -6552,29 +6552,28 @@ if page == PAGE_PRN:
             .str.strip()
         )
 
-        # Универсално числово преобразуване за директни PDF данни и Excel.
-        def parse_prn_numeric(value):
-            if pd.isna(value):
-                return None
-            if isinstance(value, (int, float, np.integer, np.floating)):
-                return float(value)
-            text = str(value).strip().replace(" ", "")
-            if not text:
-                return None
-            if "," in text and "." in text:
-                text = text.replace(".", "").replace(",", ".")
-            elif "," in text:
-                text = text.replace(",", ".")
-            try:
-                return float(text)
-            except (TypeError, ValueError):
-                return None
-
-        prn_source_df["Qty"] = prn_source_df["Qty"].apply(
-            parse_prn_numeric
+        # Безопасно преобразуване на Qty.
+        prn_source_df["Qty"] = pd.to_numeric(
+            prn_source_df["Qty"]
+            .astype(str)
+            .str.replace(
+                ",",
+                ".",
+                regex=False
+            ),
+            errors="coerce"
         )
-        prn_source_df["Price 1 pc"] = prn_source_df["Price 1 pc"].apply(
-            parse_prn_numeric
+
+        # Безопасно преобразуване на Price.
+        prn_source_df["Price 1 pc"] = pd.to_numeric(
+            prn_source_df["Price 1 pc"]
+            .astype(str)
+            .str.replace(
+                ",",
+                ".",
+                regex=False
+            ),
+            errors="coerce"
         )
 
         # Премахва празни и TOTAL редове.
