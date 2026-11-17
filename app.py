@@ -464,7 +464,7 @@ else:
 # LOAD CROSS REFERENCES FROM BOTH NEON PROJECTS
 # ======================================================
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=3600)
 def load_cross_references(vendor_no):
 
     databases = [
@@ -1662,19 +1662,6 @@ def extract_motul_rows(pdf_file):
             block_start:block_end
         ]
 
-        # The last product block can also contain the invoice summary.
-        # Everything from "Net Amount" onward is invoice-level data.
-        # It must never be treated as a discount of the last product row.
-        invoice_summary_start = None
-        for summary_index, summary_line_data in enumerate(block_lines):
-            summary_line_upper = summary_line_data["text"].upper()
-            if re.search(r"\bNET\s+AMOUNT\s*:?", summary_line_upper):
-                invoice_summary_start = summary_index
-                break
-
-        if invoice_summary_start is not None:
-            block_lines = block_lines[:invoice_summary_start]
-
         position_no = item_data["position_no"]
         invoice_item = item_data["item_no"]
         description = item_data["description"]
@@ -2817,26 +2804,10 @@ def detect_totalenergies_warehouse(full_text):
 
 
 def extract_totalenergies_rows(pdf_file):
-    """
-    TotalEnergies: SAP code = Cross Ref.
-    Converts invoiced packs to individual bottles from formats such as
-    3B5L / 3B4L / 12B1L.
-
-    Protection for rows split between PDF pages:
-    - if the pack size is missing from the product row, first inspect the
-      following line on the same page;
-    - if still missing, inspect the first real table-data line on the next
-      page, after skipping headers and service text;
-    - the next-page line is accepted only when it does not start with a new
-      position number + SAP code and it contains a valid pack size;
-    - if no pack size can be confirmed, the row is not exported as x1.
-    """
+    """TotalEnergies: SAP code = Cross Ref; convert invoice packs to individual bottles from e.g. 3B5L / 12B1L."""
     rows = []
-    warnings = []
     full_text = ""
     processed_pages = 0
-    page_lines = {}
-
     row_pattern = re.compile(
         r"^\s*(\d{1,4})\s+"             # position
         r"(\d{5,10})\s+"                 # SAP code = Cross Reference
@@ -2850,500 +2821,76 @@ def extract_totalenergies_rows(pdf_file):
         r"([\d.,]+)\s*$",                 # final total
         re.IGNORECASE
     )
-
-    pack_pattern = re.compile(
-        r"(?<!\d)(\d{1,3})\s*[BВ]\s*"
-        r"(\d+(?:[.,]\d+)?)\s*L\b",
-        re.IGNORECASE
-    )
-
-    # A standalone package such as 208L, 60L or 20L means one physical
-    # package per invoiced piece. It is different from multipacks such as
-    # 3B4L, where the first number is the multiplier.
-    single_pack_pattern = re.compile(
-        r"(?<![BВ\d])"
-        r"(\d+(?:[.,]\d+)?)\s*"
-        r"(?:ML|CL|DL|LTR|LT|L|KG|G)\b",
-        re.IGNORECASE
-    )
-
-    # A new product must begin with position number + SAP code.
-    new_product_prefix = re.compile(
-        r"^\s*\d{1,4}\s+\d{5,10}\b",
-        re.IGNORECASE
-    )
-
-    # Lines that belong to the page/invoice header, not to a product.
-    service_line_pattern = re.compile(
-        r"^(?:"
-        r"№(?:\s|$)|SAP\s+КОД|МИТНИЧЕСКИ\s+КОД|ОПИСАНИЕ|"
-        r"МЕРНА\s+Е-ЦА|К-ВО|НЕТО\s+ТЕГЛО|ЕД\.\s*ЦЕНА|"
-        r"МЕЖДИННА\s+СУМА|ДДС|КРАЙНА\s+ЦЕНА|"
-        r"ДОСТАВЧИК|ПОЛУЧАТЕЛ|ДОСТАВЕНО\s+ДО|"
-        r"ПОРЪЧКА\s*/?\s*ДАТА|ДЪРЖАВА|"
-        r"Page\s+\d+|Сток\.|УСЛОВИЯ|ДАНЪЧНА|"
-        r"ФАКТУРА|ОРИГИНАЛ|КОПИЕ"
-        r")",
-        re.IGNORECASE
-    )
-
-    pdf_file.seek(0)
-    with pdfplumber.open(pdf_file) as pdf:
-        processed_pages = len(pdf.pages)
-
-        for page_number, page in enumerate(pdf.pages, start=1):
-            page_text = page.extract_text(
-                x_tolerance=2,
-                y_tolerance=3
-            )
-            if not page_text:
-                page_lines[page_number] = []
-                continue
-
-            full_text += page_text + "\n"
-            page_lines[page_number] = [
-                " ".join(
-                    str(raw_line)
-                    .replace("\xa0", " ")
-                    .split()
-                )
-                for raw_line in page_text.splitlines()
-                if str(raw_line).strip()
-            ]
-
-    def first_continuation_on_next_page(current_page):
-        """Return the first valid packaging continuation on page + 1."""
-        next_page = current_page + 1
-        if next_page > processed_pages:
-            return ""
-
-        for candidate in page_lines.get(next_page, []):
-            candidate = candidate.strip()
-            if not candidate:
-                continue
-            if service_line_pattern.match(candidate):
-                continue
-            # A numbered row is the next product, never a continuation.
-            if new_product_prefix.match(candidate):
-                return ""
-            # Only accept a standalone line that itself confirms packaging.
-            if pack_pattern.search(candidate):
-                return candidate
-
-        return ""
-
-    for page_number in range(1, processed_pages + 1):
-        lines = page_lines.get(page_number, [])
-
-        for line_index, line in enumerate(lines):
-            match = row_pattern.match(line)
-            if not match:
-                continue
-
-            position_no = match.group(1)
-            sap_code = match.group(2)
-            description = match.group(3).strip()
-            invoice_unit = match.group(4).upper()
-            invoice_qty = parse_european_number(match.group(5))
-            invoice_unit_price = parse_european_number(match.group(7))
-            subtotal = parse_european_number(match.group(8))
-
-            if (
-                invoice_qty is None
-                or invoice_qty <= 0
-                or invoice_unit_price is None
-                or invoice_unit_price < 0
-            ):
-                warnings.append({
-                    "position_no": position_no,
-                    "invoice_item": sap_code,
-                    "reason": "Невалидно количество или цена.",
-                    "source_line": line
-                })
-                continue
-
-            continuation = ""
-            full_description = description
-            pack_match = pack_pattern.search(full_description)
-
-            # 1. Existing behavior: inspect the following line on this page.
-            if not pack_match and line_index + 1 < len(lines):
-                candidate = lines[line_index + 1].strip()
-                if (
-                    candidate
-                    and not row_pattern.match(candidate)
-                    and not new_product_prefix.match(candidate)
-                    and not service_line_pattern.match(candidate)
-                    and pack_pattern.search(candidate)
-                ):
-                    continuation = candidate
-                    full_description = (
-                        description + " " + continuation
-                    ).strip()
-                    pack_match = pack_pattern.search(full_description)
-
-            # 2. New protection: first real line on the next PDF page.
-            if not pack_match:
-                next_page_continuation = (
-                    first_continuation_on_next_page(page_number)
-                )
-                if next_page_continuation:
-                    continuation = next_page_continuation
-                    full_description = (
-                        description + " " + continuation
-                    ).strip()
-                    pack_match = pack_pattern.search(full_description)
-
-            # 3. Decide safely between multipack and one standalone pack.
-            #    - 3B4L / 12B1L -> multiplier from the number before B.
-            #    - 208L / 60L / 20L -> one physical package (x1).
-            #    - no confirmed packaging -> stop; never guess x1.
-            if pack_match:
-                bottles_per_pack = int(pack_match.group(1))
-            else:
-                single_pack_match = single_pack_pattern.search(
-                    full_description
-                )
-                if single_pack_match:
-                    bottles_per_pack = 1
-                else:
-                    warnings.append({
-                        "position_no": position_no,
-                        "invoice_item": sap_code,
-                        "reason": (
-                            "Не е потвърдена нито multipack разфасовка "
-                            "(например 3B4L), нито единична опаковка "
-                            "(например 208L). Редът е спрян."
-                        ),
-                        "source_line": line
-                    })
-                    continue
-
-            if bottles_per_pack <= 0:
-                warnings.append({
-                    "position_no": position_no,
-                    "invoice_item": sap_code,
-                    "reason": "Невалиден брой бутилки в разфасовката.",
-                    "source_line": line
-                })
-                continue
-
-            final_qty = invoice_qty * bottles_per_pack
-            final_price = round(
-                invoice_unit_price / bottles_per_pack,
-                10
-            )
-            expected_total = (
-                subtotal
-                if subtotal is not None
-                else invoice_qty * invoice_unit_price
-            )
-            calculation_ok = (
-                abs(
-                    (final_qty * final_price)
-                    - expected_total
-                )
-                <= max(
-                    0.05,
-                    abs(expected_total) * 0.0001
-                )
-            )
-
-            rows.append({
-                "invoice_item": sap_code,
-                "normalized_invoice_item": normalize_item_number(
-                    sap_code
-                ),
-                "description": full_description,
-                "position_no": position_no,
-                "invoice_qty": invoice_qty,
-                "invoice_unit": invoice_unit,
-                "pack_qty": bottles_per_pack,
-                "qty": final_qty,
-                "price": final_price,
-                "line_total": expected_total,
-                "calculation_ok": calculation_ok,
-                "page": page_number,
-                "source_line": (
-                    line
-                    + (" | " + continuation if continuation else "")
-                )
-            })
-
-    invoice_match = re.search(
-        r"НОМЕР\s*:\s*(\d{6,20})",
-        full_text,
-        re.IGNORECASE
-    )
-    invoice_number = (
-        invoice_match.group(1)
-        if invoice_match
-        else extract_invoice_number(
-            full_text,
-            pdf_file.name
-        )
-    )
-    warehouse_info = detect_totalenergies_warehouse(
-        full_text
-    )
-
-    return {
-        "invoice_number": invoice_number,
-        "pages": processed_pages,
-        "rows": rows,
-        "warnings": warnings,
-        "warehouse": warehouse_info["warehouse"],
-        "warehouse_source": warehouse_info["source"],
-        "warehouse_address": warehouse_info["address_match"]
-    }
-# ======================================================
-# KUTTENKEULER PARSER
-# VEN0000769
-# ======================================================
-def extract_kuttenkeuler_rows(pdf_file):
-    """
-    KUTTENKEULER parser за VEN0000769.
-
-    Универсална логика:
-    - No. = Cross Reference;
-    - Piece = крайно количество, независимо от вида опаковка;
-    - Amount = крайна стойност на конкретния продуктов ред;
-    - Price 1 pc = Amount / Piece.
-
-    Видът на опаковката (Fass, Kanne, Dose, Bottle и др.) и
-    Quantity/Unit се пазят само като помощна информация.
-    """
-    rows = []
-    warnings = []
-    full_text = ""
-    processed_pages = 0
-    page_lines = {}
-
     pdf_file.seek(0)
     with pdfplumber.open(pdf_file) as pdf:
         processed_pages = len(pdf.pages)
         for page_number, page in enumerate(pdf.pages, start=1):
             page_text = page.extract_text(x_tolerance=2, y_tolerance=3)
             if not page_text:
-                page_lines[page_number] = []
                 continue
             full_text += page_text + "\n"
-            page_lines[page_number] = [
-                " ".join(str(line).replace("\xa0", " ").split())
-                for line in page_text.splitlines()
-                if str(line).strip()
-            ]
+            lines = [" ".join(str(x).replace("\xa0", " ").split()) for x in page_text.splitlines()]
+            for line_index, line in enumerate(lines):
+                m = row_pattern.match(line)
+                if not m:
+                    continue
+                position_no = m.group(1)
+                sap_code = m.group(2)
+                description = m.group(3).strip()
+                invoice_unit = m.group(4).upper()
+                invoice_qty = parse_european_number(m.group(5))
+                invoice_unit_price = parse_european_number(m.group(7))
+                subtotal = parse_european_number(m.group(8))
+                if invoice_qty is None or invoice_qty <= 0 or invoice_unit_price is None or invoice_unit_price < 0:
+                    continue
 
-    document_text = " ".join(
-        line
-        for page_number in sorted(page_lines)
-        for line in page_lines[page_number]
-    )
-    document_text = re.sub(r"\s+", " ", document_text).strip()
+                # Total prints the pack information on the continuation line,
+                # e.g. "5W30 3B5L TOT 1RO" or "5W40 12B1L TOT RO".
+                continuation = ""
+                if line_index + 1 < len(lines):
+                    candidate = lines[line_index + 1]
+                    if not row_pattern.match(candidate) and not re.match(r"^(Сток\.|УСЛОВИЯ|ДАНЪЧНА|Page\b)", candidate, re.IGNORECASE):
+                        continuation = candidate
+                full_description = (description + " " + continuation).strip()
 
-    # Product data ends before invoice-level totals/footer. This avoids
-    # treating Amount Invoice, Goods EUR/net, weights or payment discount
-    # as values of the last product row.
-    footer_patterns = [
-        r"\bFREE\s+OF\s+TAX\b",
-        r"\bAMOUNT\s+INVOICE\s+EUR\b",
-        r"\bGOODS\s+EUR/NET\b",
-        r"\bNET\s+WEIGHT\b",
-        r"\bPAYMENT\s+TERM\b"
-    ]
-    footer_positions = []
-    for pattern in footer_patterns:
-        match = re.search(pattern, document_text, re.IGNORECASE)
-        if match:
-            footer_positions.append(match.start())
-    products_text = (
-        document_text[:min(footer_positions)]
-        if footer_positions
-        else document_text
-    )
+                # B = bottles in one invoiced pack. Litres identify bottle size but
+                # do not multiply the piece count. 3B5L => x3 pieces; 12B1L => x12 pieces.
+                pack_match = re.search(r"(?<!\d)(\d{1,3})\s*[BВ]\s*(\d+(?:[.,]\d+)?)\s*L\b", full_description, re.IGNORECASE)
+                bottles_per_pack = int(pack_match.group(1)) if pack_match else 1
+                if bottles_per_pack <= 0:
+                    bottles_per_pack = 1
 
-    # Header generated by pdfplumber:
-    # No. Description Quantity Unit Price Amount Unit Piece
-    header_match = re.search(
-        r"NO\.\s+DESCRIPTION\s+QUANTITY\s+UNIT\s+PRICE\s+"
-        r"AMOUNT\s+UNIT\s+PIECE",
-        products_text,
-        re.IGNORECASE
-    )
-    if header_match:
-        products_text = products_text[header_match.end():]
+                final_qty = invoice_qty * bottles_per_pack
+                final_price = invoice_unit_price / bottles_per_pack
+                final_price = round(final_price, 10)
+                expected_total = subtotal if subtotal is not None else invoice_qty * invoice_unit_price
+                calculation_ok = abs((final_qty * final_price) - expected_total) <= max(0.05, abs(expected_total) * 0.0001)
 
-    # Remove repeated page headers and continued totals, but keep all
-    # product content so rows split between pages remain one logical stream.
-    products_text = re.sub(
-        r"PAGE\s+\d+\s+INTER\s+CARS\s+BULGARIA\s+EOOD.*?"
-        r"NO\.\s+DESCRIPTION\s+QUANTITY\s+UNIT\s+PRICE\s+"
-        r"AMOUNT\s+UNIT\s+PIECE",
-        " ",
-        products_text,
-        flags=re.IGNORECASE
-    )
-    products_text = re.sub(
-        r"CONTINUED(?:\s*\.\s*)+(?:[\d.]+,\d{2})?",
-        " ",
-        products_text,
-        flags=re.IGNORECASE
-    )
-    products_text = re.sub(r"\s+", " ", products_text).strip()
-
-    product_code_pattern = re.compile(r"\b(5\d{5})\b")
-    product_starts = list(product_code_pattern.finditer(products_text))
-
-    # In these PDFs the extracted row is normally:
-    # No. + Description/packaging + Piece + Quantity + Unit + Unit Price + Amount.
-    # The description may contain numbers (60 L, 1,5 l, X12), therefore the
-    # reliable anchor is the complete numeric tail immediately before the
-    # descriptive continuation and/or the next six-digit product code.
-    for product_index, code_match in enumerate(product_starts):
-        invoice_item = code_match.group(1).strip()
-        block_end = (
-            product_starts[product_index + 1].start()
-            if product_index + 1 < len(product_starts)
-            else len(products_text)
-        )
-        block_text = products_text[code_match.end():block_end].strip()
-        block_text = re.sub(r"\s+", " ", block_text)
-
-        row_data_match = re.search(
-            r"^(?P<description>.+?)\s+"
-            r"(?P<piece>[\d.]+(?:,\d+)?)\s+"
-            r"(?P<quantity>[\d.]+(?:,\d+)?)\s+"
-            r"(?P<unit>[A-ZА-Я]+)\s+"
-            r"(?P<unit_price>[\d.]+,\d{2,6})\s+"
-            r"(?P<amount>[\d.]+,\d{2})\b"
-            r"(?P<continuation>.*)$",
-            block_text,
-            re.IGNORECASE
-        )
-        if not row_data_match:
-            warnings.append({
-                "invoice_item": invoice_item,
-                "reason": (
-                    "Не са разпознати Piece, Quantity, Unit Price и Amount."
-                ),
-                "source_line": invoice_item + " " + block_text
-            })
-            continue
-
-        description = row_data_match.group("description").strip()
-        continuation = row_data_match.group("continuation").strip()
-        def parse_kuttenkeuler_quantity(raw_value):
-            raw_text = str(raw_value or "").strip()
-            # Kuttenkeuler uses dots as thousand separators in quantity
-            # columns: 11.520 = 11520, 3.240 = 3240.
-            if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw_text):
-                raw_text = raw_text.replace(".", "")
-            return parse_european_number(raw_text)
-
-        piece_value = parse_kuttenkeuler_quantity(
-            row_data_match.group("piece")
-        )
-        invoice_quantity = parse_kuttenkeuler_quantity(
-            row_data_match.group("quantity")
-        )
-        piece_unit = row_data_match.group("unit").upper().strip()
-        invoice_unit_price = parse_european_number(
-            row_data_match.group("unit_price")
-        )
-        amount = parse_european_number(row_data_match.group("amount"))
-
-        if amount is None or amount < 0:
-            warnings.append({
-                "invoice_item": invoice_item,
-                "reason": "Невалиден Amount за продуктовия ред.",
-                "source_line": invoice_item + " " + block_text
-            })
-            continue
-        if piece_value is None or piece_value <= 0:
-            warnings.append({
-                "invoice_item": invoice_item,
-                "reason": "Невалидно Piece количество.",
-                "source_line": invoice_item + " " + block_text
-            })
-            continue
-
-        rounded_piece = round(piece_value)
-        if abs(piece_value - rounded_piece) > 0.000001:
-            warnings.append({
-                "invoice_item": invoice_item,
-                "reason": f"Piece не е цяло число: {piece_value}",
-                "source_line": invoice_item + " " + block_text
-            })
-            continue
-
-        piece = int(rounded_piece)
-        final_price = round(amount / piece, 10)
-        calculated_amount = piece * final_price
-        calculation_ok = (
-            abs(calculated_amount - amount)
-            <= max(0.02, abs(amount) * 0.0001)
-        )
-
-        full_description = (description + " " + continuation).strip()
-        packaging_match = re.search(
-            r"\b(FASS|KANNE|DOSE|BOTTLE|PAIL|DRUM|CAN|IBC)\b"
-            r"(?:\s+(\d+(?:[.,]\d+)?)\s*(?:L|LITER|ML))?",
-            full_description,
-            re.IGNORECASE
-        )
-        packaging_type = (
-            packaging_match.group(1).upper()
-            if packaging_match
-            else ""
-        )
-        pack_size = (
-            parse_european_number(packaging_match.group(2))
-            if packaging_match and packaging_match.group(2)
-            else None
-        )
-
-        rows.append({
-            "invoice_item": invoice_item,
-            "normalized_invoice_item": normalize_item_number(invoice_item),
-            "description": full_description,
-            "invoice_qty": invoice_quantity,
-            "invoice_unit": piece_unit,
-            "invoice_unit_price": invoice_unit_price,
-            "pack_qty": piece,
-            "pack_size": pack_size,
-            "packaging_type": packaging_type,
-            "qty": piece,
-            "price": final_price,
-            "line_total": amount,
-            "calculated_total": calculated_amount,
-            "calculation_ok": calculation_ok,
-            "page": 1,
-            "source_line": invoice_item + " " + block_text
-        })
-
-    invoice_match = re.search(
-        r"SALES\s*-\s*INVOICE\s+([A-Z0-9\-_/]+)",
-        full_text,
-        re.IGNORECASE
-    )
-    invoice_number = (
-        invoice_match.group(1).strip()
-        if invoice_match
-        else extract_invoice_number(full_text, pdf_file.name)
-    )
-
-    extracted_total = round(
-        sum(float(row.get("line_total", 0) or 0) for row in rows),
-        2
-    )
-
+                rows.append({
+                    "invoice_item": sap_code,
+                    "normalized_invoice_item": normalize_item_number(sap_code),
+                    "description": full_description,
+                    "position_no": position_no,
+                    "invoice_qty": invoice_qty,
+                    "invoice_unit": invoice_unit,
+                    "pack_qty": bottles_per_pack,
+                    "qty": final_qty,
+                    "price": final_price,
+                    "line_total": expected_total,
+                    "calculation_ok": calculation_ok,
+                    "page": page_number,
+                    "source_line": line + (" | " + continuation if continuation else "")
+                })
+    invoice_match = re.search(r"НОМЕР\s*:\s*(\d{6,20})", full_text, re.IGNORECASE)
+    invoice_number = invoice_match.group(1) if invoice_match else extract_invoice_number(full_text, pdf_file.name)
+    warehouse_info = detect_totalenergies_warehouse(full_text)
     return {
         "invoice_number": invoice_number,
         "pages": processed_pages,
         "rows": rows,
-        "warnings": warnings,
-        "extracted_positions": len(rows),
-        "extracted_total": extracted_total
+        "warehouse": warehouse_info["warehouse"],
+        "warehouse_source": warehouse_info["source"],
+        "warehouse_address": warehouse_info["address_match"]
     }
 
 # ======================================================
@@ -5073,11 +4620,6 @@ if page == "📄 PDF → Excel":
                 elif selected_vendor_no == "VEN0002867":
                 
                     extracted = extract_valvoline_rows(
-                        pdf_file
-                    )
-                # Kuttenkeuler
-                elif selected_vendor_no == "VEN0000769":
-                    extracted = extract_kuttenkeuler_rows(
                         pdf_file
                     )
             
