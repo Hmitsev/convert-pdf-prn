@@ -3083,536 +3083,246 @@ def extract_kuttenkeuler_rows(pdf_file):
     """
     KUTTENKEULER parser за VEN0000769.
 
-    PDF логика:
-    - No. = Cross Reference
-    - Piece = крайно количество физически опаковки
-    - Quantity = литри
-    - Amount = обща стойност на реда
-    - Price 1 pc = Amount / Piece
+    Универсална логика:
+    - No. = Cross Reference;
+    - Piece = крайно количество, независимо от вида опаковка;
+    - Amount = крайна стойност на конкретния продуктов ред;
+    - Price 1 pc = Amount / Piece.
 
-    Примери:
-    510046 | Fass 60 L  | Piece 54  | Quantity 3.240 L
-           | Amount 4.795,20
-           -> Qty = 54
-           -> Price = 4795.20 / 54 = 88.80
-
-    510048 | Fass 200 L | Piece 8   | Quantity 1.600 L
-           | Amount 2.208,00
-           -> Qty = 8
-           -> Price = 2208.00 / 8 = 276.00
-
-    510395 | Kanne 20L | Piece 112 | Quantity 2.240 L
-           -> Qty = 112
-
-    Поддържа и позиции/фактури на повече от една страница.
+    Видът на опаковката (Fass, Kanne, Dose, Bottle и др.) и
+    Quantity/Unit се пазят само като помощна информация.
     """
-
     rows = []
     warnings = []
     full_text = ""
     processed_pages = 0
-    document_lines = []
+    page_lines = {}
 
     pdf_file.seek(0)
-
     with pdfplumber.open(pdf_file) as pdf:
-
         processed_pages = len(pdf.pages)
-
-        for page_number, page in enumerate(
-            pdf.pages,
-            start=1
-        ):
-
-            page_text = page.extract_text(
-                x_tolerance=2,
-                y_tolerance=3
-            )
-
+        for page_number, page in enumerate(pdf.pages, start=1):
+            page_text = page.extract_text(x_tolerance=2, y_tolerance=3)
             if not page_text:
+                page_lines[page_number] = []
                 continue
-
             full_text += page_text + "\n"
-
-            for original_line in page_text.splitlines():
-
-                clean_line = " ".join(
-                    str(original_line)
-                    .replace("\xa0", " ")
-                    .split()
-                )
-
-                if not clean_line:
-                    continue
-
-                document_lines.append({
-                    "page": page_number,
-                    "text": clean_line
-                })
-
-    # --------------------------------------------------
-    # Обединяваме документа.
-    #
-    # Kuttenkeuler PDF често връща колоните в различен
-    # визуален ред, затова не разчитаме един продукт
-    # задължително да бъде на един PDF text line.
-    # --------------------------------------------------
+            page_lines[page_number] = [
+                " ".join(str(line).replace("\xa0", " ").split())
+                for line in page_text.splitlines()
+                if str(line).strip()
+            ]
 
     document_text = " ".join(
-        line_data["text"]
-        for line_data in document_lines
+        line
+        for page_number in sorted(page_lines)
+        for line in page_lines[page_number]
     )
+    document_text = re.sub(r"\s+", " ", document_text).strip()
 
-    document_text = re.sub(
-        r"\s+",
-        " ",
-        document_text
-    ).strip()
-
-    # --------------------------------------------------
-    # Отрязваме invoice total / footer.
-    # --------------------------------------------------
-
+    # Product data ends before invoice-level totals/footer. This avoids
+    # treating Amount Invoice, Goods EUR/net, weights or payment discount
+    # as values of the last product row.
     footer_patterns = [
+        r"\bFREE\s+OF\s+TAX\b",
         r"\bAMOUNT\s+INVOICE\s+EUR\b",
         r"\bGOODS\s+EUR/NET\b",
         r"\bNET\s+WEIGHT\b",
         r"\bPAYMENT\s+TERM\b"
     ]
-
     footer_positions = []
-
-    for footer_pattern in footer_patterns:
-
-        footer_match = re.search(
-            footer_pattern,
-            document_text,
-            re.IGNORECASE
-        )
-
-        if footer_match:
-            footer_positions.append(
-                footer_match.start()
-            )
-
-    if footer_positions:
-
-        products_text = document_text[
-            :min(footer_positions)
-        ]
-
-    else:
-
-        products_text = document_text
-
-    # --------------------------------------------------
-    # PRODUCT START
-    #
-    # Kuttenkeuler Cross Reference:
-    # 510046
-    # 510048
-    # 510206
-    # 510208
-    # 510398
-    # 510395
-    #
-    # Търсим точно 6 цифри.
-    # --------------------------------------------------
-
-    product_start_pattern = re.compile(
-        r"\b(5\d{5})\b"
+    for pattern in footer_patterns:
+        match = re.search(pattern, document_text, re.IGNORECASE)
+        if match:
+            footer_positions.append(match.start())
+    products_text = (
+        document_text[:min(footer_positions)]
+        if footer_positions
+        else document_text
     )
 
-    starts = list(
-        product_start_pattern.finditer(
-            products_text
-        )
+    # Header generated by pdfplumber:
+    # No. Description Quantity Unit Price Amount Unit Piece
+    header_match = re.search(
+        r"NO\.\s+DESCRIPTION\s+QUANTITY\s+UNIT\s+PRICE\s+"
+        r"AMOUNT\s+UNIT\s+PIECE",
+        products_text,
+        re.IGNORECASE
     )
+    if header_match:
+        products_text = products_text[header_match.end():]
 
-    for index, start_match in enumerate(starts):
+    # Remove repeated page headers and continued totals, but keep all
+    # product content so rows split between pages remain one logical stream.
+    products_text = re.sub(
+        r"PAGE\s+\d+\s+INTER\s+CARS\s+BULGARIA\s+EOOD.*?"
+        r"NO\.\s+DESCRIPTION\s+QUANTITY\s+UNIT\s+PRICE\s+"
+        r"AMOUNT\s+UNIT\s+PIECE",
+        " ",
+        products_text,
+        flags=re.IGNORECASE
+    )
+    products_text = re.sub(
+        r"CONTINUED(?:\s*\.\s*)+(?:[\d.]+,\d{2})?",
+        " ",
+        products_text,
+        flags=re.IGNORECASE
+    )
+    products_text = re.sub(r"\s+", " ", products_text).strip()
 
-        invoice_item = (
-            start_match.group(1)
-            .strip()
+    product_code_pattern = re.compile(r"\b(5\d{5})\b")
+    product_starts = list(product_code_pattern.finditer(products_text))
+
+    # In these PDFs the extracted row is normally:
+    # No. + Description/packaging + Piece + Quantity + Unit + Unit Price + Amount.
+    # The description may contain numbers (60 L, 1,5 l, X12), therefore the
+    # reliable anchor is the complete numeric tail immediately before the
+    # descriptive continuation and/or the next six-digit product code.
+    for product_index, code_match in enumerate(product_starts):
+        invoice_item = code_match.group(1).strip()
+        block_end = (
+            product_starts[product_index + 1].start()
+            if product_index + 1 < len(product_starts)
+            else len(products_text)
         )
+        block_text = products_text[code_match.end():block_end].strip()
+        block_text = re.sub(r"\s+", " ", block_text)
 
-        block_start = start_match.start()
-
-        if index + 1 < len(starts):
-
-            block_end = starts[
-                index + 1
-            ].start()
-
-        else:
-
-            block_end = len(
-                products_text
-            )
-
-        block_text = products_text[
-            block_start:block_end
-        ]
-
-        block_text = re.sub(
-            r"\s+",
-            " ",
-            block_text
-        ).strip()
-
-        # ----------------------------------------------
-        # Защита от служебен номер.
-        # Реалният продуктов блок трябва да съдържа
-        # Fass или Kanne.
-        # ----------------------------------------------
-
-        if not re.search(
-            r"\b(?:FASS|KANNE)\b",
-            block_text,
-            re.IGNORECASE
-        ):
-            continue
-
-        # ----------------------------------------------
-        # PACKAGING
-        #
-        # Fass 60 L
-        # Fass 200 L
-        # Kanne 20L
-        # ----------------------------------------------
-
-        packaging_match = re.search(
-            r"\b"
-            r"(FASS|KANNE)"
-            r"\s+"
-            r"(\d+(?:[.,]\d+)?)"
-            r"\s*L\b",
+        row_data_match = re.search(
+            r"^(?P<description>.+?)\s+"
+            r"(?P<piece>[\d.]+(?:,\d+)?)\s+"
+            r"(?P<quantity>[\d.]+(?:,\d+)?)\s+"
+            r"(?P<unit>[A-ZА-Я]+)\s+"
+            r"(?P<unit_price>[\d.]+,\d{2,6})\s+"
+            r"(?P<amount>[\d.]+,\d{2})\b"
+            r"(?P<continuation>.*)$",
             block_text,
             re.IGNORECASE
         )
-
-        if not packaging_match:
-
+        if not row_data_match:
             warnings.append({
                 "invoice_item": invoice_item,
                 "reason": (
-                    "Не е намерена разфасовка "
-                    "Fass/Kanne."
+                    "Не са разпознати Piece, Quantity, Unit Price и Amount."
                 ),
-                "source_line": block_text
+                "source_line": invoice_item + " " + block_text
             })
-
             continue
 
-        packaging_type = (
-            packaging_match.group(1)
-            .upper()
-            .strip()
+        description = row_data_match.group("description").strip()
+        continuation = row_data_match.group("continuation").strip()
+        def parse_kuttenkeuler_quantity(raw_value):
+            raw_text = str(raw_value or "").strip()
+            # Kuttenkeuler uses dots as thousand separators in quantity
+            # columns: 11.520 = 11520, 3.240 = 3240.
+            if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw_text):
+                raw_text = raw_text.replace(".", "")
+            return parse_european_number(raw_text)
+
+        piece_value = parse_kuttenkeuler_quantity(
+            row_data_match.group("piece")
         )
-
-        pack_litres = (
-            parse_european_number(
-                packaging_match.group(2)
-            )
+        invoice_quantity = parse_kuttenkeuler_quantity(
+            row_data_match.group("quantity")
         )
-
-        # ----------------------------------------------
-        # В Kuttenkeuler непосредствено след:
-        #
-        # Fass 60 L
-        # или
-        # Kanne 20L
-        #
-        # PDF extraction дава:
-        #
-        # Piece + Quantity + L + Unit Price + Amount
-        #
-        # Но визуалният ред може да бъде разместен.
-        # Затова извличаме numeric candidates.
-        # ----------------------------------------------
-
-        after_packaging = block_text[
-            packaging_match.end():
-        ]
-
-        numeric_values = re.findall(
-            r"\b\d{1,3}(?:\.\d{3})*(?:,\d+)?\b",
-            after_packaging
+        piece_unit = row_data_match.group("unit").upper().strip()
+        invoice_unit_price = parse_european_number(
+            row_data_match.group("unit_price")
         )
+        amount = parse_european_number(row_data_match.group("amount"))
 
-        parsed_values = []
-
-        for raw_value in numeric_values:
-
-            parsed_value = (
-                parse_european_number(
-                    raw_value
-                )
-            )
-
-            if parsed_value is not None:
-
-                parsed_values.append(
-                    parsed_value
-                )
-
-        # Нужни са минимум:
-        # Piece, Quantity, Unit Price, Amount
-
-        if len(parsed_values) < 4:
-
+        if amount is None or amount < 0:
             warnings.append({
                 "invoice_item": invoice_item,
-                "reason": (
-                    "Не са намерени Piece, Quantity, "
-                    "Unit Price и Amount."
-                ),
-                "source_line": block_text
+                "reason": "Невалиден Amount за продуктовия ред.",
+                "source_line": invoice_item + " " + block_text
             })
-
             continue
-
-        # ----------------------------------------------
-        # По самата структура на Kuttenkeuler:
-        #
-        # Последната числова стойност = Amount.
-        #
-        # Предходната = Unit Price.
-        #
-        # Търсим Piece чрез проверка:
-        #
-        # Piece * litres_per_pack ≈ Quantity
-        # ----------------------------------------------
-
-        amount = parsed_values[-1]
-
-        unit_price_per_litre = (
-            parsed_values[-2]
-        )
-
-        piece = None
-        litre_quantity = None
-
-        if pack_litres is not None and pack_litres > 0:
-
-            for value_index in range(
-                len(parsed_values) - 2
-            ):
-
-                candidate_piece = (
-                    parsed_values[value_index]
-                )
-
-                if candidate_piece <= 0:
-                    continue
-
-                if abs(
-                    candidate_piece
-                    - round(candidate_piece)
-                ) > 0.000001:
-                    continue
-
-                expected_litres = (
-                    candidate_piece
-                    * pack_litres
-                )
-
-                for quantity_candidate in (
-                    parsed_values[
-                        value_index + 1:
-                        -2
-                    ]
-                ):
-
-                    tolerance = max(
-                        0.01,
-                        expected_litres * 0.0001
-                    )
-
-                    if abs(
-                        quantity_candidate
-                        - expected_litres
-                    ) <= tolerance:
-
-                        piece = int(
-                            round(
-                                candidate_piece
-                            )
-                        )
-
-                        litre_quantity = (
-                            quantity_candidate
-                        )
-
-                        break
-
-                if piece is not None:
-                    break
-
-        if (
-            piece is None
-            or
-            piece <= 0
-        ):
-
+        if piece_value is None or piece_value <= 0:
             warnings.append({
                 "invoice_item": invoice_item,
-                "reason": (
-                    "Piece не може да бъде потвърден "
-                    "чрез Quantity и разфасовката."
-                ),
-                "source_line": block_text
+                "reason": "Невалидно Piece количество.",
+                "source_line": invoice_item + " " + block_text
             })
-
             continue
 
-        # ----------------------------------------------
-        # PRICE 1 PC
-        #
-        # ВАЖНО:
-        # НЕ използваме директно Unit Price,
-        # защото той е цена за литър.
-        #
-        # Price 1 pc = Amount / Piece
-        # ----------------------------------------------
+        rounded_piece = round(piece_value)
+        if abs(piece_value - rounded_piece) > 0.000001:
+            warnings.append({
+                "invoice_item": invoice_item,
+                "reason": f"Piece не е цяло число: {piece_value}",
+                "source_line": invoice_item + " " + block_text
+            })
+            continue
 
-        final_price = (
-            amount
-            / piece
-        )
-
-        final_price = round(
-            final_price,
-            10
-        )
-
-        calculated_amount = (
-            piece
-            * final_price
-        )
-
-        amount_tolerance = max(
-            0.02,
-            abs(amount) * 0.0001
-        )
-
+        piece = int(rounded_piece)
+        final_price = round(amount / piece, 10)
+        calculated_amount = piece * final_price
         calculation_ok = (
-            abs(
-                calculated_amount
-                - amount
-            )
-            <= amount_tolerance
+            abs(calculated_amount - amount)
+            <= max(0.02, abs(amount) * 0.0001)
+        )
+
+        full_description = (description + " " + continuation).strip()
+        packaging_match = re.search(
+            r"\b(FASS|KANNE|DOSE|BOTTLE|PAIL|DRUM|CAN|IBC)\b"
+            r"(?:\s+(\d+(?:[.,]\d+)?)\s*(?:L|LITER|ML))?",
+            full_description,
+            re.IGNORECASE
+        )
+        packaging_type = (
+            packaging_match.group(1).upper()
+            if packaging_match
+            else ""
+        )
+        pack_size = (
+            parse_european_number(packaging_match.group(2))
+            if packaging_match and packaging_match.group(2)
+            else None
         )
 
         rows.append({
-
-            "invoice_item":
-                invoice_item,
-
-            "normalized_invoice_item":
-                normalize_item_number(
-                    invoice_item
-                ),
-
-            "description":
-                block_text,
-
-            "invoice_qty":
-                litre_quantity,
-
-            "invoice_unit":
-                "L",
-
-            "pack_qty":
-                piece,
-
-            "pack_size":
-                pack_litres,
-
-            "packaging_type":
-                packaging_type,
-
-            "qty":
-                piece,
-
-            "price":
-                final_price,
-
-            "line_total":
-                amount,
-
-            "calculation_ok":
-                calculation_ok,
-
-            "page":
-                1,
-
-            "source_line":
-                block_text
+            "invoice_item": invoice_item,
+            "normalized_invoice_item": normalize_item_number(invoice_item),
+            "description": full_description,
+            "invoice_qty": invoice_quantity,
+            "invoice_unit": piece_unit,
+            "invoice_unit_price": invoice_unit_price,
+            "pack_qty": piece,
+            "pack_size": pack_size,
+            "packaging_type": packaging_type,
+            "qty": piece,
+            "price": final_price,
+            "line_total": amount,
+            "calculated_total": calculated_amount,
+            "calculation_ok": calculation_ok,
+            "page": 1,
+            "source_line": invoice_item + " " + block_text
         })
 
-    # --------------------------------------------------
-    # INVOICE NUMBER
-    #
-    # Sales - Invoice 177592
-    # --------------------------------------------------
-
     invoice_match = re.search(
-        r"SALES\s*-\s*INVOICE\s+"
-        r"([A-Z0-9\-_/]+)",
+        r"SALES\s*-\s*INVOICE\s+([A-Z0-9\-_/]+)",
         full_text,
         re.IGNORECASE
     )
-
-    if invoice_match:
-
-        invoice_number = (
-            invoice_match.group(1)
-            .strip()
-        )
-
-    else:
-
-        invoice_number = (
-            extract_invoice_number(
-                full_text,
-                pdf_file.name
-            )
-        )
+    invoice_number = (
+        invoice_match.group(1).strip()
+        if invoice_match
+        else extract_invoice_number(full_text, pdf_file.name)
+    )
 
     extracted_total = round(
-        sum(
-            float(
-                row.get(
-                    "line_total",
-                    0
-                )
-                or 0
-            )
-            for row in rows
-        ),
+        sum(float(row.get("line_total", 0) or 0) for row in rows),
         2
     )
 
     return {
-
-        "invoice_number":
-            invoice_number,
-
-        "pages":
-            processed_pages,
-
-        "rows":
-            rows,
-
-        "warnings":
-            warnings,
-
-        "extracted_positions":
-            len(rows),
-
-        "extracted_total":
-            extracted_total
+        "invoice_number": invoice_number,
+        "pages": processed_pages,
+        "rows": rows,
+        "warnings": warnings,
+        "extracted_positions": len(rows),
+        "extracted_total": extracted_total
     }
 
 # ======================================================
