@@ -243,7 +243,7 @@ def get_connection():
 # LOAD VENDORS
 # ======================================================
 
-@st.cache_data(ttl=700)
+@st.cache_data(ttl=70)
 def load_vendors():
 
     conn = psycopg2.connect(
@@ -464,7 +464,7 @@ else:
 # LOAD CROSS REFERENCES FROM BOTH NEON PROJECTS
 # ======================================================
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=360)
 def load_cross_references(vendor_no):
 
     databases = [
