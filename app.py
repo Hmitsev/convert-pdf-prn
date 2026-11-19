@@ -2927,7 +2927,10 @@ def extract_totalenergies_rows(pdf_file):
             if new_product_prefix.match(candidate):
                 return ""
             # Only accept a standalone line that itself confirms packaging.
-            if pack_pattern.search(candidate):
+            if (
+                pack_pattern.search(candidate)
+                or single_pack_pattern.search(candidate)
+            ):
                 return candidate
 
         return ""
@@ -2974,7 +2977,10 @@ def extract_totalenergies_rows(pdf_file):
                     and not row_pattern.match(candidate)
                     and not new_product_prefix.match(candidate)
                     and not service_line_pattern.match(candidate)
-                    and pack_pattern.search(candidate)
+                    and (
+                        pack_pattern.search(candidate)
+                        or single_pack_pattern.search(candidate)
+                    )
                 ):
                     continuation = candidate
                     full_description = (
