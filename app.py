@@ -1434,13 +1434,13 @@ def detect_motul_warehouse(full_text):
     )
 
     address_b01 = re.search(
-        r"(?:INDUSTRIALNA|ИНДУСТРИАЛНА)\s*(?:STR\.?|УЛ\.?)?\s*7\b",
+        r"INDUSTRIALNA\s+STR\.?\s*7\b",
         address_search_text,
         re.IGNORECASE
     )
 
     address_b02 = re.search(
-        r"(?:INDUSTRIALNA|ИНДУСТРИАЛНА)\s*(?:STR\.?|УЛ\.?)?\s*8\b",
+        r"INDUSTRIALNA\s+STR\.?\s*8\b",
         address_search_text,
         re.IGNORECASE
     )
@@ -2882,7 +2882,7 @@ def extract_totalenergies_rows(pdf_file):
     single_pack_pattern = re.compile(
         r"(?<![BВ\d])"
         r"(\d+(?:[.,]\d+)?)\s*"
-        r"(?:ML|CL|DL|LTR|LT|L|KG|G)\b",
+        r"(?:ML|CL|DL|LTR|LT|LP|L|KG|G)\b",
         re.IGNORECASE
     )
 
@@ -2958,13 +2958,10 @@ def extract_totalenergies_rows(pdf_file):
         lines = page_lines.get(page_number, [])
 
         for line_index, line in enumerate(lines):
-            match = row_pattern.match(line)
-            if not match:
-                # Fallback for TotalEnergies extraction variants such as 20LP.
-                normalized_line = re.sub(r"\s+", " ", line.replace("\xa0", " ")).strip()
-                # Some PDFs join the package suffix to the litre value (for example 20LP, 50LP or 208LP); normalize every number + LP variant.
-                normalized_line = re.sub(r"\b(\d+(?:[.,]\d+)?)LP\b", r"\1L P", normalized_line, flags=re.IGNORECASE)
-                match = row_pattern.match(normalized_line)
+            # Normalize whitespace first. Keep LP intact because it is a valid
+            # standalone package marker (20LP, 50LP, 208LP, etc.).
+            normalized_line = re.sub(r"\s+", " ", line.replace("\xa0", " ")).strip()
+            match = row_pattern.match(normalized_line)
             if not match:
                 continue
 
@@ -5994,13 +5991,11 @@ if page == "📄 PDF → Excel":
                                     direct_prn_df.copy()
                                 )
 
-                                multi_prn_name = str(invoice_no).strip()
-                                warehouse_for_prn = str(warehouse or "").strip().upper()
-                                if warehouse_for_prn in {"B01", "B02"}:
-                                    multi_prn_name = f"{multi_prn_name} ({warehouse_for_prn})"
                                 st.session_state[
                                     "direct_prn_name"
-                                ] = multi_prn_name
+                                ] = str(
+                                    invoice_no
+                                )
 
                                 # Изчистваме container режима.
                                 st.session_state[
