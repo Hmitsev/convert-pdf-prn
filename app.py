@@ -1346,12 +1346,10 @@ def detect_motul_warehouse(full_text):
             "address_match": ""
         }
 
-    search_text = (
-        str(full_text)
-        .upper()
-        .replace("В01", "B01")
-        .replace("В02", "B02")
-    )
+    search_text = str(full_text).upper()
+    # Normalize Latin/Cyrillic and spaced OCR variants: B01, В01, B 01, В 02.
+    search_text = re.sub(r"[BВ]\s*0\s*1", "B01", search_text, flags=re.IGNORECASE)
+    search_text = re.sub(r"[BВ]\s*0\s*2", "B02", search_text, flags=re.IGNORECASE)
 
     # ==============================================
     # 1. REF.-NO. - ВИНАГИ С ПРИОРИТЕТ
@@ -1393,7 +1391,27 @@ def detect_motul_warehouse(full_text):
             }
 
     # ==============================================
-    # 2. FALLBACK - CONSIGNEE / INVOICE ADDRESS
+    # 2. EXPLICIT WAREHOUSE CODE IN CONSIGNEE / DELIVERY TEXT
+    # ==============================================
+    # If B01/B02 is printed explicitly, it has priority over the street address.
+    explicit_scope_match = re.search(
+        r"(?:CONSIGNEE|DELIVER(?:ED)?\s+TO|SHIP\s+TO)\s*:?.{0,700}",
+        search_text,
+        re.IGNORECASE | re.DOTALL
+    )
+    explicit_scope = explicit_scope_match.group(0) if explicit_scope_match else search_text[:3000]
+    explicit_code_match = re.search(r"\bB0([12])\b", explicit_scope, re.IGNORECASE)
+    if explicit_code_match:
+        explicit_code = "B0" + explicit_code_match.group(1)
+        return {
+            "warehouse": explicit_code,
+            "source": "Изписан код на склад",
+            "ref_no": ref_no,
+            "address_match": ""
+        }
+
+    # ==============================================
+    # 3. FALLBACK - CONSIGNEE / INVOICE ADDRESS
     # ==============================================
 
     consignee_text = ""
@@ -2806,9 +2824,10 @@ def detect_totalenergies_warehouse(full_text):
     text = str(full_text or "").upper().replace("В01", "B01").replace("В02", "B02")
     delivery_match = re.search(r"ДОСТАВЕНО\s+ДО\s*:?.{0,350}", text, re.IGNORECASE | re.DOTALL)
     delivery_text = delivery_match.group(0) if delivery_match else text[:3000]
-    code_match = re.search(r"СКЛАД\s*(B0[12])\b", delivery_text, re.IGNORECASE)
+    code_match = re.search(r"СКЛАД\s*[:#./-]*\s*(B\s*0\s*[12])\b", delivery_text, re.IGNORECASE)
     if code_match:
-        return {"warehouse": code_match.group(1).upper(), "source": "Доставено до", "address_match": ""}
+        warehouse_code = re.sub(r"\s+", "", code_match.group(1)).upper()
+        return {"warehouse": warehouse_code, "source": "Доставено до", "address_match": ""}
     if re.search(r"ИНДУСТРИАЛНА\s+7\b", delivery_text, re.IGNORECASE):
         return {"warehouse": "B01", "source": "Адрес", "address_match": "ул. Индустриална 7"}
     if re.search(r"ИНДУСТРИАЛНА\s+8\b", delivery_text, re.IGNORECASE):
@@ -2940,6 +2959,12 @@ def extract_totalenergies_rows(pdf_file):
 
         for line_index, line in enumerate(lines):
             match = row_pattern.match(line)
+            if not match:
+                # Fallback for TotalEnergies extraction variants such as 20LP.
+                normalized_line = re.sub(r"\s+", " ", line.replace("\xa0", " ")).strip()
+                # Some PDFs join the package suffix to the litre value (for example 20LP, 50LP or 208LP); normalize every number + LP variant.
+                normalized_line = re.sub(r"\b(\d+(?:[.,]\d+)?)LP\b", r"\1L P", normalized_line, flags=re.IGNORECASE)
+                match = row_pattern.match(normalized_line)
             if not match:
                 continue
 
@@ -5103,7 +5128,7 @@ if page == "📄 PDF → Excel":
                 # MOTUL WAREHOUSE RESULT
                 # ==========================================
                 
-                if selected_vendor_no in ("VEN0001554", "VEN0001135"):
+                if selected_vendor_no in ("VEN0001554", "VEN0001135") or is_totalenergies_invoice_pdf(pdf_file):
                 
                     motul_warehouses.append({
                         "warehouse":
