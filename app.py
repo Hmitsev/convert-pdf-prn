@@ -1434,13 +1434,13 @@ def detect_motul_warehouse(full_text):
     )
 
     address_b01 = re.search(
-        r"INDUSTRIALNA\s+STR\.?\s*7\b",
+        r"(?:INDUSTRIALNA|ИНДУСТРИАЛНА)\s*(?:STR\.?|УЛ\.?)?\s*7\b",
         address_search_text,
         re.IGNORECASE
     )
 
     address_b02 = re.search(
-        r"INDUSTRIALNA\s+STR\.?\s*8\b",
+        r"(?:INDUSTRIALNA|ИНДУСТРИАЛНА)\s*(?:STR\.?|УЛ\.?)?\s*8\b",
         address_search_text,
         re.IGNORECASE
     )
@@ -5994,11 +5994,13 @@ if page == "📄 PDF → Excel":
                                     direct_prn_df.copy()
                                 )
 
+                                multi_prn_name = str(invoice_no).strip()
+                                warehouse_for_prn = str(warehouse or "").strip().upper()
+                                if warehouse_for_prn in {"B01", "B02"}:
+                                    multi_prn_name = f"{multi_prn_name} ({warehouse_for_prn})"
                                 st.session_state[
                                     "direct_prn_name"
-                                ] = str(
-                                    invoice_no
-                                )
+                                ] = multi_prn_name
 
                                 # Изчистваме container режима.
                                 st.session_state[
