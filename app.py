@@ -1047,7 +1047,27 @@ def extract_motul_pack_quantity(description):
     )
 
     if not pack_match:
-        return 1
+        # MOTUL KIT fallback: descriptions can contain only X6 / X12,
+        # e.g. "KIT ENGINE CLEAN GASOLINE X6 EFS", without a litre size.
+        # In this format X<number> is the number of physical pieces per CAR.
+        kit_pack_match = re.search(
+            r"(?:^|\s)X\s*(\d{1,4})(?=\s|$)",
+            text,
+            re.IGNORECASE
+        )
+        if not kit_pack_match:
+            return 1
+        try:
+            pack_quantity = int(
+                kit_pack_match.group(1)
+            )
+        except (TypeError, ValueError):
+            return 1
+        if not (
+            1 <= pack_quantity <= 1000
+        ):
+            return 1
+        return pack_quantity
 
     try:
         pack_quantity = int(
