@@ -2117,7 +2117,31 @@ def extract_motul_rows(pdf_file):
     warehouse_info = detect_motul_warehouse(
         full_text
     )
-
+    
+    # ==================================================
+    # MOTUL FINAL INVOICE TOTAL
+    # ==================================================
+    # Взимаме официалния краен Total от самата фактура,
+    # а не сбора Qty * Price на продуктовите редове.
+    #
+    # Пример:
+    # 22.758,19 EUR Terms Of Payment
+    # -> 22758.19
+    
+    invoice_total = None
+    
+    total_matches = re.findall(
+        r"([\d.]+,\d{2})\s*EUR\s*"
+        r"Terms\s+Of\s+Payment",
+        full_text,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+    
+    if total_matches:
+        invoice_total = parse_european_number(
+            total_matches[-1]
+        )
+    
     return {
         "invoice_number":
             invoice_number,
@@ -2150,8 +2174,11 @@ def extract_motul_rows(pdf_file):
             warehouse_info.get(
                 "address_match",
                 ""
-            )
-    }
+            ),
+        
+        "invoice_total":
+            invoice_total
+        }
 # ======================================================
 # VALVOLINE PARSER
 # ======================================================
@@ -4446,8 +4473,10 @@ def match_invoice_rows(
 # ======================================================
 # CREATE EXCEL
 # ======================================================
-
-def create_invoice_excel(result_df):
+def create_invoice_excel(
+    result_df,
+    invoice_total=None
+):
 
     export_df = result_df[
         [
@@ -4460,7 +4489,7 @@ def create_invoice_excel(result_df):
     
     ].copy()
 
-    grand_total = (
+    calculated_total = (
         pd.to_numeric(
             export_df["Qty"],
             errors="coerce"
@@ -4471,6 +4500,11 @@ def create_invoice_excel(result_df):
             errors="coerce"
         )
     ).sum()
+    
+    if invoice_total is not None:
+        grand_total = float(invoice_total)
+    else:
+        grand_total = calculated_total
 
     total_row = pd.DataFrame([
         {
@@ -5591,9 +5625,26 @@ if page == "📄 PDF → Excel":
             prn_invoice_name = (
                 "multiple_invoices"
             )
+        # ==============================================
+        # OFFICIAL INVOICE TOTAL FOR EXCEL
+        # ==============================================
+        
+        excel_invoice_total = None
+        
+        # Използваме официалния Total само когато
+        # обработваме една MOTUL фактура.
+        if (
+            len(invoice_numbers) == 1
+            and
+            selected_vendor_no == "VEN0001554"
+        ):
+            excel_invoice_total = extracted.get(
+                "invoice_total"
+            )    
 
         excel_output = create_invoice_excel(
-            final_result_df
+            final_result_df,
+            invoice_total=excel_invoice_total
         )
         
         # Проверяваме дали резултатът съдържа контейнери.
