@@ -1933,6 +1933,43 @@ def extract_motul_rows(pdf_file):
                     ]
                 )
 
+        # ==========================================
+        # DIRECT FREE MOTUL POSITION: Net-Price ... 0,00
+        # ==========================================
+        # Example: Net-Price 4 CAR 0,00
+        # This format has quantity and zero price, but no normal Amount.
+        # Keep the row and force its gross/net amount to zero so it reaches
+        # the PRN output instead of being skipped by gross_amount is None.
+        direct_net_zero = False
+        if invoice_quantity is None or gross_amount is None:
+            for block_line_data in block_lines:
+                block_line = block_line_data["text"]
+                net_zero_match = re.search(
+                    r"\bNET[-\s]*PRICE\b\s+"
+                    r"(\d+(?:[.,]\d+)?)\s+"
+                    r"(CAR|PCE|EA)\s+"
+                    r"0(?:[.,]0+)?(?:\s|$)",
+                    block_line,
+                    re.IGNORECASE
+                )
+                if not net_zero_match:
+                    continue
+
+                zero_quantity = parse_european_number(
+                    net_zero_match.group(1)
+                )
+                zero_unit = net_zero_match.group(2).upper().strip()
+
+                if zero_quantity is None or zero_quantity <= 0:
+                    continue
+
+                invoice_quantity = zero_quantity
+                invoice_unit = zero_unit
+                gross_amount = 0.0
+                quantity_source_line = block_line
+                direct_net_zero = True
+                break
+
         if invoice_quantity is None:
             continue
 
@@ -2059,7 +2096,7 @@ def extract_motul_rows(pdf_file):
 
         # Частичен discount: Amount минус EUR discount, после / Qty.
         # 100% discount: Price е точно 0, без влияние от закръгляне.
-        if is_full_discount:
+        if direct_net_zero or is_full_discount:
             net_amount = 0.0
         else:
             net_amount = gross_amount - discount_amount
@@ -2169,6 +2206,9 @@ def extract_motul_rows(pdf_file):
 
             "is_full_discount":
                 is_full_discount,
+
+            "direct_net_zero":
+                direct_net_zero,
 
             "net_amount":
                 net_amount,
