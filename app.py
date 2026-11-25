@@ -4788,7 +4788,11 @@ def prepare_direct_prn_dataframe(result_df):
     prn_df["Price 1 pc"] = pd.to_numeric(
         result_df["Price 1 pc"],
         errors="coerce"
-    ).fillna(0)
+    )
+    prn_df["Price 1 pc"] = prn_df["Price 1 pc"].where(
+        prn_df["Price 1 pc"].notna(),
+        0.0
+    ).astype(float)
 
     # Премахва празните и техническите редове.
     prn_df = prn_df[
@@ -5015,9 +5019,12 @@ def create_prn_content(prn_df):
         if price < 0:
             continue
 
+        if abs(price) < 0.0000005:
+            price = 0.0
         price_str = (
-            f"{price:.6f}"
-            .replace(".", ",")
+            "0,000000"
+            if price == 0.0
+            else f"{price:.6f}".replace(".", ",")
         )
 
         spaces_before_qty = max(
@@ -6884,9 +6891,12 @@ if page == PAGE_PRN:
             if price < 0:
                 continue
 
+            if abs(price) < 0.0000005:
+                price = 0.0
             price_str = (
-                f"{price:.6f}"
-                .replace(".", ",")
+                "0,000000"
+                if price == 0.0
+                else f"{price:.6f}".replace(".", ",")
             )
 
             spaces_before_qty = max(
