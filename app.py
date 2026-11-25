@@ -4273,96 +4273,83 @@ def extract_container_invoice_rows(pdf_file):
 def build_cross_reference_indexes(
     cross_refs
 ):
+    """Build deterministic indexes without losing duplicate references.
 
+    Direct matching is always keyed by the exact Cross Reference printed on
+    the invoice. An Item No. may have several Cross References, so item_index
+    keeps all of them and is used only when no direct Cross Reference exists.
+    """
     direct_index = {}
     item_index = {}
 
     for _, row in cross_refs.iterrows():
-
-        vendor_no = str(
-            row.get(
-                "vendor_no",
-                ""
-            )
-        ).strip()
-
+        vendor_no = str(row.get("vendor_no", "") or "").strip()
         cross_reference_no = str(
-            row.get(
-                "cross_reference_no",
-                ""
-            )
+            row.get("cross_reference_no", "") or ""
         ).strip()
+        item_no = str(row.get("item_no", "") or "").strip()
 
-        item_no = str(
-            row.get(
-                "item_no",
-                ""
-            )
-        ).strip()
-
-        normalized_cross_reference = (
-            normalize_item_number(
-                row.get(
-                    "normalized_cross_reference",
-                    cross_reference_no
-                )
-            )
+        # Do not trust an empty/NaN normalized database field. Rebuild the
+        # key from the real Cross Reference / Item No. so values such as
+        # 114622 cannot disappear from the index.
+        normalized_cross_reference = normalize_item_number(
+            row.get("normalized_cross_reference", "")
         )
-
-        normalized_item_no = (
-            normalize_item_number(
-                row.get(
-                    "normalized_item_no",
-                    item_no
-                )
+        if not normalized_cross_reference:
+            normalized_cross_reference = normalize_item_number(
+                cross_reference_no
             )
+
+        normalized_item_no = normalize_item_number(
+            row.get("normalized_item_no", "")
         )
+        if not normalized_item_no:
+            normalized_item_no = normalize_item_number(item_no)
+
+        reference = {
+            "vendor_no": vendor_no,
+            "cross_reference_no": cross_reference_no,
+            "item_no": item_no,
+            "internal_item_no": item_no
+        }
 
         if normalized_cross_reference:
-
-            if (
-                normalized_cross_reference
-                not in direct_index
-            ):
-
-                direct_index[
-                    normalized_cross_reference
-                ] = {
-                    "vendor_no":
-                        vendor_no,
-                
-                    "cross_reference_no":
-                        cross_reference_no,
-                
-                    "item_no":
-                        item_no,
-                
-                    "internal_item_no":
-                        item_no
-                }
+            direct_index.setdefault(
+                normalized_cross_reference,
+                []
+            ).append(reference)
 
         if normalized_item_no:
+            item_index.setdefault(
+                normalized_item_no,
+                []
+            ).append(reference)
 
-            if (
-                normalized_item_no
-                not in item_index
-            ):
-
-               item_index[
-                    normalized_item_no
-                ] = {
-                    "vendor_no":
-                        vendor_no,
-                
-                    "cross_reference_no":
-                        cross_reference_no,
-                
-                    "item_no":
-                        item_no,
-                
-                    "internal_item_no":
-                        item_no
-                }
+    # Stable order removes dependence on database return order.
+    for index in (direct_index, item_index):
+        for key, references in index.items():
+            unique_references = {}
+            for reference in references:
+                unique_key = (
+                    normalize_item_number(
+                        reference.get("cross_reference_no", "")
+                    ),
+                    normalize_item_number(
+                        reference.get("internal_item_no", "")
+                    )
+                )
+                unique_references[unique_key] = reference
+            index[key] = sorted(
+                unique_references.values(),
+                key=lambda reference: (
+                    normalize_item_number(
+                        reference.get("cross_reference_no", "")
+                    ),
+                    normalize_item_number(
+                        reference.get("internal_item_no", "")
+                    )
+                )
+            )
 
     return direct_index, item_index
 
@@ -4370,170 +4357,112 @@ def build_cross_reference_indexes(
 # ======================================================
 # MATCH INVOICE ROWS TO NEON
 # ======================================================
-
 def match_invoice_rows(
     invoice_rows,
     selected_vendor_no,
     cross_refs
 ):
-
-    (
-        direct_index,
-        item_index
-    ) = build_cross_reference_indexes(
+    direct_index, item_index = build_cross_reference_indexes(
         cross_refs
     )
-
     matched_rows = []
 
     for invoice_row in invoice_rows:
-
-        invoice_item = invoice_row[
-            "invoice_item"
-        ]
-
+        invoice_item = invoice_row["invoice_item"]
         normalized_item = invoice_row[
             "normalized_invoice_item"
         ]
-        
         quantity = invoice_row["qty"]
         price = invoice_row["price"]
 
         match_status = "not_found"
-
-        output_cross_reference = (
-            f"❗ {invoice_item}"
-        )
-
+        output_cross_reference = f"❗ {invoice_item}"
         internal_item_no = ""
 
-        # ======================================
-        # DIRECT CROSS REFERENCE
-        # ======================================
+        # 1. Exact Cross Reference from the invoice always has priority.
+        # If Item No. has two or more Cross References in Neon, only the one
+        # actually printed on the invoice is considered here.
+        direct_candidates = direct_index.get(
+            normalized_item,
+            []
+        )
+        exact_candidates = [
+            reference
+            for reference in direct_candidates
+            if normalize_item_number(
+                reference.get("cross_reference_no", "")
+            ) == normalized_item
+        ]
 
-        if normalized_item in direct_index:
-
-            reference = direct_index[
-                normalized_item
+        if exact_candidates:
+            reference = exact_candidates[0]
+            output_cross_reference = reference[
+                "internal_item_no"
             ]
-
-            output_cross_reference = (
-                reference[
-                    "internal_item_no"
-                ]
-            )
-            
-            internal_item_no = (
-                reference[
-                    "cross_reference_no"
-                ]
-            )
-
+            internal_item_no = reference[
+                "internal_item_no"
+            ]
             match_status = "direct"
 
-        # ======================================
-        # FALLBACK THROUGH ITEM NO.
-        # ======================================
-
+        # 2. Item No. fallback is allowed only when the invoice value is not
+        # an exact Cross Reference. It never overrides an exact invoice ref.
         elif normalized_item in item_index:
-
-            reference = item_index[
-                normalized_item
-            ]
-
+            item_candidates = item_index[normalized_item]
+            reference = item_candidates[0]
             output_cross_reference = (
                 "⚠️ "
-                + reference[
-                    "cross_reference_no"
-                ]
+                + reference["cross_reference_no"]
             )
-
-            internal_item_no = (
-                reference["internal_item_no"]
-            )
-
+            internal_item_no = reference[
+                "internal_item_no"
+            ]
             match_status = "item_no"
 
         matched_rows.append({
-
-            "Cross-Reference Type No.":
-                selected_vendor_no,
-        
-            "Item No.":
-                output_cross_reference,
-        
-            "Cross-Reference No.":
-                invoice_item,
-        
-            "Qty":
-                quantity,
-        
-            "Price 1 pc":
-                price,
-            "_invoice_item":
-                invoice_item,
-
-            "_internal_item_no":
-                internal_item_no,
-
-            "_status":
-                match_status,
-
-            "_page":
-                invoice_row["page"],
-            "_invoice_qty":
-                invoice_row.get(
-                    "invoice_qty",
-                    quantity
-                ),
-            
-            "_invoice_unit":
-                invoice_row.get(
-                    "invoice_unit",
-                    ""
-                ),
-            
-            "_pack_qty":
-                invoice_row.get(
-                    "pack_qty",
-                    1
-                ),
-            
-            "_description":
-                invoice_row.get(
-                    "description",
-                    ""
-                ),
-            "_container_no":
-                invoice_row.get(
-                    "container_no",
-                    ""
-                ),
-            
-            "_seal_no":
-                invoice_row.get(
-                    "seal_no",
-                    ""
-                ),
-            
-            "_weight":
-                invoice_row.get(
-                    "weight",
-                    None
-                ),
-
-            "_line_total":
-                invoice_row["line_total"],
-
-            "_calculation_ok":
-                invoice_row[
-                    "calculation_ok"
-                ]
+            "Cross-Reference Type No.": selected_vendor_no,
+            "Item No.": output_cross_reference,
+            "Cross-Reference No.": invoice_item,
+            "Qty": quantity,
+            "Price 1 pc": price,
+            "_invoice_item": invoice_item,
+            "_internal_item_no": internal_item_no,
+            "_status": match_status,
+            "_page": invoice_row["page"],
+            "_invoice_qty": invoice_row.get(
+                "invoice_qty",
+                quantity
+            ),
+            "_invoice_unit": invoice_row.get(
+                "invoice_unit",
+                ""
+            ),
+            "_pack_qty": invoice_row.get(
+                "pack_qty",
+                1
+            ),
+            "_description": invoice_row.get(
+                "description",
+                ""
+            ),
+            "_container_no": invoice_row.get(
+                "container_no",
+                ""
+            ),
+            "_seal_no": invoice_row.get(
+                "seal_no",
+                ""
+            ),
+            "_weight": invoice_row.get(
+                "weight",
+                None
+            ),
+            "_line_total": invoice_row["line_total"],
+            "_calculation_ok": invoice_row[
+                "calculation_ok"
+            ]
         })
 
-    return pd.DataFrame(
-        matched_rows
-    )
+    return pd.DataFrame(matched_rows)
 
 
 # ======================================================
