@@ -464,7 +464,7 @@ else:
 # LOAD CROSS REFERENCES FROM BOTH NEON PROJECTS
 # ======================================================
 
-@st.cache_data(ttl=360)
+@st.cache_data(ttl=60)
 def load_cross_references(vendor_no):
 
     databases = [
