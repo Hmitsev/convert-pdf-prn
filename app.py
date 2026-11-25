@@ -1918,64 +1918,110 @@ def extract_motul_rows(pdf_file):
             continue
 
         # ==========================================
-        # DISCOUNT
+        # DISCOUNT - ALWAYS USE EUR AMOUNT
         # ==========================================
-
+        
         discount_source_line = ""
-
+        
         for block_line_data in block_lines:
+        
             block_line = block_line_data["text"]
-
+            block_line_upper = block_line.upper()
+        
+            parsed_discount = None
+        
+            # --------------------------------------
+            # 1. MDEU EXP Add Disc
+            #
+            # Example:
+            # MDEU EXP Add Disc % 12,00- 386,02
+            #
+            # Percentage is ignored.
+            # Only the final EUR amount is used.
+            # --------------------------------------
+        
             if (
-                "ADD DISC" not in block_line.upper()
-                and
-                "MDEU EXP" not in block_line.upper()
+                "ADD DISC" in block_line_upper
+                or
+                "MDEU EXP" in block_line_upper
             ):
-                continue
-
-            discount_match = discount_pattern.search(
-                block_line
-            )
-
-            if discount_match:
-                parsed_discount = (
-                    parse_european_number(
-                        discount_match.group(2)
-                    )
-                )
-
-                if parsed_discount is not None:
-                    if parsed_discount >= 0:
-                        discount_amount += (
-                            parsed_discount
-                        )
-                        discount_source_line = (
-                            block_line
-                        )
-
-                continue
-
-            fallback_match = (
-                discount_fallback_pattern.search(
+        
+                discount_match = discount_pattern.search(
                     block_line
                 )
-            )
-
-            if fallback_match:
-                parsed_discount = (
-                    parse_european_number(
-                        fallback_match.group(1)
-                    )
-                )
-
-                if parsed_discount is not None:
-                    if parsed_discount >= 0:
-                        discount_amount += (
-                            parsed_discount
+        
+                if discount_match:
+        
+                    parsed_discount = (
+                        parse_european_number(
+                            discount_match.group(2)
                         )
-                        discount_source_line = (
+                    )
+        
+                else:
+        
+                    fallback_match = (
+                        discount_fallback_pattern.search(
                             block_line
                         )
+                    )
+        
+                    if fallback_match:
+        
+                        parsed_discount = (
+                            parse_european_number(
+                                fallback_match.group(1)
+                            )
+                        )
+        
+            # --------------------------------------
+            # 2. POSITION O. BERECHNUNG
+            #
+            # Example:
+            # Position o. Berechnung 100,00- 82,13
+            #
+            # 100% is ignored.
+            # Only 82,13 EUR is used.
+            # --------------------------------------
+        
+            if (
+                "POSITION O. BERECHNUNG"
+                in block_line_upper
+            ):
+        
+                free_position_match = re.search(
+                    r"POSITION\s+O\.\s*BERECHNUNG"
+                    r".*?"
+                    r"\d+(?:[.,]\d+)?\s*[-−]"
+                    r"\s+"
+                    r"([\d.]+(?:,\d+)?)",
+                    block_line,
+                    re.IGNORECASE
+                )
+        
+                if free_position_match:
+        
+                    parsed_discount = (
+                        parse_european_number(
+                            free_position_match.group(1)
+                        )
+                    )
+        
+            # --------------------------------------
+            # ADD ONLY REAL EUR DISCOUNT
+            # --------------------------------------
+        
+            if (
+                parsed_discount is not None
+                and
+                parsed_discount >= 0
+            ):
+        
+                discount_amount += parsed_discount
+        
+                discount_source_line = (
+                    block_line
+                )
 
         # Нетна стойност след отстъпката.
         net_amount = (
