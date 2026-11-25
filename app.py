@@ -1336,23 +1336,6 @@ def extract_valvoline_litre_size(description):
 # MOTUL WAREHOUSE DETECTION
 # ======================================================
 def detect_motul_warehouse(full_text):
-    """
-    Определя склада за MOTUL.
-
-    Приоритет:
-    1. Ref.-No. -> B01 / B02
-    2. Изрично изписан B01 / B02 около Consignee / Delivery
-    3. Адрес Industrialna 7 -> B01
-    4. Адрес Industrialna 8 -> B02
-
-    Поддържа:
-    B01 / B02
-    В01 / В02
-    B 01 / B 02
-    Industrialna str. 7 / 8
-    Industrialna 7 / 8
-    """
-
     if not full_text:
         return {
             "warehouse": "Неопределен",
@@ -1361,72 +1344,35 @@ def detect_motul_warehouse(full_text):
             "address_match": ""
         }
 
-    search_text = str(full_text).upper()
+    text = str(full_text).upper()
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"\s+", " ", text)
 
-    # --------------------------------------------------
-    # НОРМАЛИЗАЦИЯ B01 / B02
-    # --------------------------------------------------
-    # Поддържа латинско B и кирилско В,
-    # както и OCR варианти B 01 / B 02.
-    search_text = re.sub(
-        r"[BВ]\s*0\s*1",
-        "B01",
-        search_text,
-        flags=re.IGNORECASE
-    )
-
-    search_text = re.sub(
-        r"[BВ]\s*0\s*2",
-        "B02",
-        search_text,
-        flags=re.IGNORECASE
-    )
+    # Нормализира кирилско В -> латинско B
+    text = text.replace("В01", "B01")
+    text = text.replace("В02", "B02")
 
     # ==================================================
     # 1. REF.-NO. - НАЙ-ВИСОК ПРИОРИТЕТ
     # ==================================================
-    # Примери:
+    # Хваща например:
     # Ref.-No.: B02_20260619_1
-    # Ref-No: B01_20260619_1
-    # Ref. No. B02_20260720_1
-    # REF NO: B01
-    #
-    # Важно:
-    # Не разчитаме на прекалено строг формат на "Ref.-No.".
-    # Вземаме целия код след полето до първия whitespace.
+    # Ref-No: B02_20260619_1
+    # Ref. No.: B01_20260619_1
 
     ref_match = re.search(
-        r"\bREF\s*[\.\-]?\s*NO\.?\s*:?\s*"
+        r"REF[\s.\-]*NO\.?\s*:?\s*"
         r"([A-Z0-9_./\-]+)",
-        search_text,
+        text,
         re.IGNORECASE
     )
 
     ref_no = ""
 
     if ref_match:
-        ref_no = (
-            ref_match.group(1)
-            .strip()
-            .upper()
-        )
+        ref_no = ref_match.group(1).strip().upper()
 
-        # Допълнителна нормализация вътре в Ref.-No.
-        ref_no = re.sub(
-            r"[BВ]\s*0\s*1",
-            "B01",
-            ref_no,
-            flags=re.IGNORECASE
-        )
-
-        ref_no = re.sub(
-            r"[BВ]\s*0\s*2",
-            "B02",
-            ref_no,
-            flags=re.IGNORECASE
-        )
-
-        if "B01" in ref_no:
+        if re.search(r"\bB\s*0\s*1", ref_no):
             return {
                 "warehouse": "B01",
                 "source": "Ref.-No.",
@@ -1434,7 +1380,7 @@ def detect_motul_warehouse(full_text):
                 "address_match": ""
             }
 
-        if "B02" in ref_no:
+        if re.search(r"\bB\s*0\s*2", ref_no):
             return {
                 "warehouse": "B02",
                 "source": "Ref.-No.",
@@ -1443,89 +1389,65 @@ def detect_motul_warehouse(full_text):
             }
 
     # ==================================================
-    # 2. CONSIGNEE / DELIVERY ЗОНА
+    # 2. ДИРЕКТНО ТЪРСЕНЕ НА B01/B02 СЛЕД REF
     # ==================================================
-    # Ограничаваме търсенето около реалния получател,
-    # за да не прихванем адреса на Company / Invoice To.
+    # Допълнителна защита, ако pdfplumber е разделил
+    # "Ref.-No." и самия код по необичаен начин.
 
-    consignee_match = re.search(
-        r"\bCONSIGNEE\b\s*:?.{0,700}",
-        search_text,
-        re.IGNORECASE | re.DOTALL
+    ref_area = re.search(
+        r"REF.{0,100}",
+        text,
+        re.IGNORECASE
     )
 
-    delivery_match = re.search(
-        r"(?:DELIVER(?:ED)?\s+TO|SHIP\s+TO)"
-        r"\s*:?.{0,700}",
-        search_text,
-        re.IGNORECASE | re.DOTALL
+    if ref_area:
+        area = ref_area.group(0)
+
+        if re.search(r"\bB\s*0\s*1\b", area):
+            return {
+                "warehouse": "B01",
+                "source": "Ref.-No.",
+                "ref_no": "B01",
+                "address_match": ""
+            }
+
+        if re.search(r"\bB\s*0\s*2\b", area):
+            return {
+                "warehouse": "B02",
+                "source": "Ref.-No.",
+                "ref_no": "B02",
+                "address_match": ""
+            }
+
+    # ==================================================
+    # 3. CONSIGNEE - АДРЕС НА РЕАЛНИЯ ПОЛУЧАТЕЛ
+    # ==================================================
+
+    consignee_match = re.search(
+        r"CONSIGNEE.{0,500}",
+        text,
+        re.IGNORECASE
     )
 
     if consignee_match:
-        delivery_scope = consignee_match.group(0)
-    elif delivery_match:
-        delivery_scope = delivery_match.group(0)
+        consignee_text = consignee_match.group(0)
     else:
-        # Само резервен вариант.
-        delivery_scope = search_text[:3000]
+        consignee_text = ""
 
     # ==================================================
-    # 3. ИЗРИЧНО B01 / B02 В CONSIGNEE / DELIVERY
+    # 4. INDUSTRIALNA 8 -> B02
     # ==================================================
-    explicit_code_match = re.search(
-        r"\bB0([12])\b",
-        delivery_scope,
+    # Хваща:
+    # Industrialna 8
+    # Industrialna str. 8
+    # Industrialna str 8
+    # Industrialna street 8
+
+    if re.search(
+        r"\bINDUSTRIALNA(?:\s+(?:STR|STREET)\.?)?\s*8\b",
+        consignee_text,
         re.IGNORECASE
-    )
-
-    if explicit_code_match:
-        warehouse_code = (
-            "B0" + explicit_code_match.group(1)
-        )
-
-        return {
-            "warehouse": warehouse_code,
-            "source": "Изписан код на склад",
-            "ref_no": ref_no,
-            "address_match": ""
-        }
-
-    # ==================================================
-    # 4. ADDRESS FALLBACK
-    # ==================================================
-    # Поддържа и:
-    #
-    # Industrialna str. 7
-    # Industrialna str 7
-    # Industrialna 7
-    #
-    # както и същите варианти за 8.
-
-    address_b01 = re.search(
-        r"\bINDUSTRIALNA"
-        r"(?:\s+STR\.?)?"
-        r"\s*[,.\-]?\s*7\b",
-        delivery_scope,
-        re.IGNORECASE
-    )
-
-    address_b02 = re.search(
-        r"\bINDUSTRIALNA"
-        r"(?:\s+STR\.?)?"
-        r"\s*[,.\-]?\s*8\b",
-        delivery_scope,
-        re.IGNORECASE
-    )
-
-    if address_b01 and not address_b02:
-        return {
-            "warehouse": "B01",
-            "source": "Адрес",
-            "ref_no": ref_no,
-            "address_match": "Industrialna 7"
-        }
-
-    if address_b02 and not address_b01:
+    ):
         return {
             "warehouse": "B02",
             "source": "Адрес",
@@ -1533,14 +1455,43 @@ def detect_motul_warehouse(full_text):
             "address_match": "Industrialna 8"
         }
 
-    # Ако по някаква причина и двата адреса попаднат
-    # в една и съща зона, НЕ гадаем.
-    if address_b01 and address_b02:
+    # ==================================================
+    # 5. INDUSTRIALNA 7 -> B01
+    # ==================================================
+
+    if re.search(
+        r"\bINDUSTRIALNA(?:\s+(?:STR|STREET)\.?)?\s*7\b",
+        consignee_text,
+        re.IGNORECASE
+    ):
         return {
-            "warehouse": "Неопределен",
-            "source": "Конфликт в адреса",
+            "warehouse": "B01",
+            "source": "Адрес",
             "ref_no": ref_no,
-            "address_match": "Industrialna 7 + Industrialna 8"
+            "address_match": "Industrialna 7"
+        }
+
+    # ==================================================
+    # 6. ПОСЛЕДЕН FALLBACK ПО CONSIGNEE
+    # ==================================================
+    # При конкретните MOTUL фактури адресът на Company
+    # може да съдържа Industrialna 7, затова НЕ търсим
+    # адреса глобално в целия PDF.
+
+    if re.search(r"\bB\s*0\s*2\b", consignee_text):
+        return {
+            "warehouse": "B02",
+            "source": "Consignee",
+            "ref_no": ref_no,
+            "address_match": ""
+        }
+
+    if re.search(r"\bB\s*0\s*1\b", consignee_text):
+        return {
+            "warehouse": "B01",
+            "source": "Consignee",
+            "ref_no": ref_no,
+            "address_match": ""
         }
 
     return {
