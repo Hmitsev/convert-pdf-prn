@@ -1741,6 +1741,8 @@ def extract_motul_rows(pdf_file):
         invoice_unit = None
         gross_amount = None
         discount_amount = 0.0
+        discount_percent = None
+        is_full_discount = False
         quantity_source_line = ""
 
                 # ==========================================
@@ -1972,11 +1974,17 @@ def extract_motul_rows(pdf_file):
         
                 if discount_match:
         
-                    parsed_discount = (
-                        parse_european_number(
-                            discount_match.group(2)
-                        )
+                    discount_percent = parse_european_number(
+                        discount_match.group(1)
                     )
+                    parsed_discount = parse_european_number(
+                        discount_match.group(2)
+                    )
+                    if (
+                        discount_percent is not None
+                        and discount_percent >= 99.999
+                    ):
+                        is_full_discount = True
         
                 else:
         
@@ -2012,7 +2020,7 @@ def extract_motul_rows(pdf_file):
                 free_position_match = re.search(
                     r"POSITION\s+O\.\s*BERECHNUNG"
                     r".*?"
-                    r"\d+(?:[.,]\d+)?\s*[-−]"
+                    r"(\d+(?:[.,]\d+)?)\s*[-−]"
                     r"\s+"
                     r"([\d.]+(?:,\d+)?)",
                     block_line,
@@ -2021,11 +2029,17 @@ def extract_motul_rows(pdf_file):
         
                 if free_position_match:
         
-                    parsed_discount = (
-                        parse_european_number(
-                            free_position_match.group(1)
-                        )
+                    discount_percent = parse_european_number(
+                        free_position_match.group(1)
                     )
+                    parsed_discount = parse_european_number(
+                        free_position_match.group(2)
+                    )
+                    if (
+                        discount_percent is not None
+                        and discount_percent >= 99.999
+                    ):
+                        is_full_discount = True
         
             # --------------------------------------
             # ADD ONLY REAL EUR DISCOUNT
@@ -2043,11 +2057,15 @@ def extract_motul_rows(pdf_file):
                     block_line
                 )
 
-        # Нетна стойност след отстъпката.
-        net_amount = (
-            gross_amount
-            - discount_amount
-        )
+        # Частичен discount: Amount минус EUR discount, после / Qty.
+        # 100% discount: Price е точно 0, без влияние от закръгляне.
+        if is_full_discount:
+            net_amount = 0.0
+        else:
+            net_amount = gross_amount - discount_amount
+
+        if net_amount < 0 and abs(net_amount) <= 0.02:
+            net_amount = 0.0
 
         if net_amount < 0:
             continue
@@ -2145,6 +2163,12 @@ def extract_motul_rows(pdf_file):
 
             "discount_amount":
                 discount_amount,
+
+            "discount_percent":
+                discount_percent,
+
+            "is_full_discount":
+                is_full_discount,
 
             "net_amount":
                 net_amount,
